@@ -111,6 +111,7 @@ static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	uint8_t *s;
 	int i;
 	// compute q[1]
+	q[0] = mp_alloc(rope->node);
 	q[1] = rbr_leaf_init(rope);
 	s = p->x[1].s;
 	for (i = rope->max_runs>>1; i < p->x[0].n; ++i) // compute q[1]->c[]
@@ -119,10 +120,9 @@ static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	memset(s + (rope->max_runs>>1), 0, rope->max_runs>>1); // clear the later half
 	q[1]->x[0].n = p->x[0].n - (rope->max_runs>>1);
 	// compute q[0]
-	q[0] = mp_alloc(rope->node);
 	memcpy(q[0], p, sizeof(rbrnode_t)); // copy everything to q[0], including p->x[0].s and p->c[]
 	q[0]->x[0].n = rope->max_runs>>1;
-	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i];
+	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i]&(~1ULL);
 	// finalize p
 	set_internal(p);
 	p->x[0].p = q[0]; p->x[1].p = q[1];
@@ -198,6 +198,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	uint64_t z, y, l;
 	int da[MAX_HEIGHT], dir, k, c;
 
+	fprintf(stderr, "%c,%lld\n", "$ACGTN"[a], x);
 	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
 	pa[0] = 0, da[0] = -1;
