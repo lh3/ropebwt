@@ -20,7 +20,7 @@ extern "C" {
 	void rbr_get_counts(rbrope6_t *rope, uint64_t c[6]);
 
 	rbriter_t *rbr_iter_init(const rbrope6_t *rope); // to free, simply call free()
-	const uint8_t *rbr_iter_next(rbriter_t *iter, int *n);
+	const uint8_t *rbr_iter_next(rbriter_t *iter, int *n, int *l);
 
 #ifdef __cplusplus
 }

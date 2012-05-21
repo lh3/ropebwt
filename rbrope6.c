@@ -199,7 +199,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 
 	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
-	pa[0] = 0, da[0] = 0;
+	pa[0] = 0, da[0] = -1;
 	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
 		l = rbr_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, z += p->c[a];
@@ -209,7 +209,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 		p->c[a] += 2;
 	}
 	p->c[a] += 2; // the leaf count has not been updated
-	z += insert_to_leaf(p, a, x - l) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
+	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
 	if (p->x[0].n + 2 <= MAX_RUNS) return z;
 	// we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
@@ -269,10 +269,11 @@ rbriter_t *rbr_iter_init(const rbrope6_t *rope)
 	return iter;
 }
 
-const uint8_t *rbr_iter_next(rbriter_t *iter, int *n)
+const uint8_t *rbr_iter_next(rbriter_t *iter, int *n, int *l)
 {
 	const uint8_t *ret;
 	if (iter->k < 0) return 0;
+	*l = rbr_strlen(iter->pa[iter->k]);
 	*n = iter->pa[iter->k]->x[0].n;
 	ret = iter->pa[iter->k]->x[1].s;
 	// find the next leaf

@@ -41,7 +41,9 @@ int main(int argc, char *argv[])
 	rbrope6_t *rope;
 	gzFile fp;
 	kseq_t *ks;
-	int c, for_only = 0;
+	int n, l, c, for_only = 0;
+	const uint8_t *s;
+	rbriter_t *iter;
 
 	while ((c = getopt(argc, argv, "f")) >= 0)
 		if (c == 'f') for_only = 1;
@@ -64,6 +66,16 @@ int main(int argc, char *argv[])
 	}
 	kseq_destroy(ks);
 	gzclose(fp);
+
+	iter = rbr_iter_init(rope);
+	while ((s = rbr_iter_next(iter, &n, &l)) != 0) {
+		int i, j;
+		printf("%d\t%d\t", n, l);
+		for (i = 0; i < n; ++i)
+			for (j = 0; j < s[i]>>3; ++j)
+				putchar("$ACGTN"[s[i]&7]);
+	}
+	putchar('\n');
 	rbr_destroy(rope);
 	return 0;
 }
