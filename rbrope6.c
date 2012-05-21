@@ -201,7 +201,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	fprintf(stderr, "%c,%lld\n", "$ACGTN"[a], x);
 	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
-	pa[0] = 0, da[0] = -1;
+	pa[0] = rope->root, da[0] = -1;
 	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
 		l = rbr_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, z += p->c[a];
