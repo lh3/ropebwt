@@ -75,8 +75,8 @@ int main(int argc, char *argv[])
 		for (i = 0; i < n; ++i)
 			for (j = 0; j < s[i]>>3; ++j)
 				putchar("$ACGTN"[s[i]&7]);
+		putchar('\n');
 	}
-	putchar('\n');
 	rbr_destroy(rope);
 	return 0;
 }

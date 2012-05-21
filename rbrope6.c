@@ -67,7 +67,7 @@ typedef struct rbrnode_s {
 #define set_black(_p) ((_p)->c[0] &= ~1U)
 
 #define is_leaf(_p) ((_p)->c[1]&1)
-#define set_leaf(_p) ((_p)->c[1] |= 1, (_p)->c[0] |= 1) // leaves are all black
+#define set_leaf(_p) ((_p)->c[1] |= 1, (_p)->c[0] &= ~1U) // leaves are all black
 #define set_internal(_p) ((_p)->c[1] &= ~1U)
 
 #define rbr_strlen(_p) (((_p)->c[0]>>1) + ((_p)->c[1]>>1) + ((_p)->c[2]>>1) + ((_p)->c[3]>>1) + ((_p)->c[4]>>1) + ((_p)->c[5]>>1))
@@ -110,15 +110,15 @@ static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	rbrnode_t *q[2];
 	uint8_t *s;
 	int i;
-	// compute q[1]
 	q[0] = mp_alloc(rope->node);
 	q[1] = rbr_leaf_init(rope);
+	// compute q[1]
 	s = p->x[1].s;
-	for (i = rope->max_runs>>1; i < p->x[0].n; ++i) // compute q[1]->c[]
-		q[1]->c[s[i]&7] += s[i]>>3;
 	memcpy(q[1]->x[1].s, s + (rope->max_runs>>1), rope->max_runs>>1); // copy the later half to q[1]
 	memset(s + (rope->max_runs>>1), 0, rope->max_runs>>1); // clear the later half
 	q[1]->x[0].n = p->x[0].n - (rope->max_runs>>1);
+	for (i = 0, s = q[1]->x[1].s; i < q[1]->x[0].n; ++i) // compute q[1]->c[]
+		q[1]->c[s[i]&7] += s[i]>>3;
 	// compute q[0]
 	memcpy(q[0], p, sizeof(rbrnode_t)); // copy everything to q[0], including p->x[0].s and p->c[]
 	q[0]->x[0].n = rope->max_runs>>1;
