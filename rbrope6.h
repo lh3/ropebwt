@@ -1,5 +1,5 @@
-#ifndef IBWT_H
-#define IBWT_H
+#ifndef RBROPE6_H
+#define RBROPE6_H
 
 #include <stdint.h>
 

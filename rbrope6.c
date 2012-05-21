@@ -1,6 +1,7 @@
 #include <stdlib.h>
-#include <stdio.h>
 #include <assert.h>
+#include <string.h>
+#include <stdio.h>
 #include "rbrope6.h"
 
 /***********************************
@@ -53,7 +54,7 @@ static inline void *mp_alloc(mempool_t *mp)
 typedef struct rbr_node_s {
 	uint64_t c[6];
 	union {
-		struct rbr_node_s rbr_node_t *p; // pointer to children; internal node only
+		struct rbr_node_s *p; // pointer to children; internal node only
 		size_t n; // number of runs; leaf.x[0] only
 		uint8_t *s; // string; leaf.x[1] only
 	} x[2];
@@ -93,13 +94,13 @@ rbrope6_t *rbr_init(void)
 	rope->node = mp_init(sizeof(rbr_node_t));
 	rope->str  = mp_init(MAX_RUNS);
 	rope->root = rbr_leaf_init(rope);
-	return p;
+	return rope;
 }
 
 void rbr_destroy(rbrope6_t *rope)
 {
-	mp_destroy(mp->node);
-	mp_destroy(mp->str);
+	mp_destroy(rope->node);
+	mp_destroy(rope->str);
 	free(rope);
 }
 
@@ -148,7 +149,7 @@ static int insert_to_leaf(rbr_node_t *p, int a, int x)
 	if (l == x && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
 	if ((s[i]&7) == a) { // insert to a long $a run
 		if (s[i]>>3 == 31) { // the run is full
-			for (++i; i != n && (s[i]&7) == a; ++i); // find the end of the long run
+			for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
 			--i;
 			if (s[i]>>3 == 31) { // then we have to add one run
 				_insert_after(p->x[0].n, s, i, 1<<3|a);
@@ -192,10 +193,10 @@ static inline void update_count(rbr_node_t *p) // recompute counts from the two 
 // insert $a after $x characters in $rope and return "\sum_{c=0}^{$a-1} C(c) + |{0<=i<$x:$rope[i]==$a}| + 1"
 uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
 {
-	rbr_node_t *p, *q[2], *pa[MAX_HEIGHT];
+	rbr_node_t *p, *pa[MAX_HEIGHT];
 	uint64_t z, y, l;
 	int da[MAX_HEIGHT], dir, k, c;
-	rbr_note_t *root = rope->root;
+	rbr_node_t *root = rope->root;
 
 	for (c = 0, z = 0; c < a; ++c) z += root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
@@ -209,13 +210,13 @@ uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
 		p->c[a] += 2;
 	}
 	p->c[a] += 2; // the leaf count has not been updated
-	z += insert_to_block(p->x[0].n, p->x[1].s, a, x - l) + 1; // +1 to include $rope[$x], which equals $a
+	z += insert_to_leaf(p, a, x - l) + 1; // +1 to include $rope[$x], which equals $a
 	if (p->x[0].n + 2 <= MAX_RUNS) return z;
 	// now we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
 	while (k >= 3 && is_red(pa[k - 1])) {
 		int i = da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
-		rbr_node_t *r = pa[k - 2]->p[j]; // $r points to the uncle
+		rbr_node_t *r = pa[k - 2]->x[j].p; // $r points to the uncle
 		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
 			set_black(r);
 			set_black(pa[k - 1]);
@@ -225,7 +226,7 @@ uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
 			rbr_node_t *t;
 			if (da[k - 1] != i) { // if the child and the parent are on different sides: 
 				t = pa[k - 1]; // $t: parent node
-				r = t->p[j]; // $r: sibling node
+				r = t->x[j].p; // $r: sibling node
 				t->x[j].p = r->x[i].p; update_count(t); // rotate to the same side
 				r->x[i].p = t; update_count(r);
 				pa[k - 2]->x[i].p = r;
@@ -235,7 +236,7 @@ uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
 			set_black(r);
 			t->x[i].p = r->x[j].p; update_count(t);
 			r->x[j].p = t; update_count(r);
-			pa[k - 3]->p[da[k - 3]] = r;
+			pa[k - 3]->x[da[k - 3]].p = r;
 			break;
 		}
 	}
