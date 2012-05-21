@@ -12,7 +12,8 @@ extern "C" {
 
 	rbrope6_t *rbr_init(void);
 	void rbr_destroy(rbrope6_t *rope);
-	uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x);
+	uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x);
+	void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str);
 
 #ifdef __cplusplus
 }

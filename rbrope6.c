@@ -190,18 +190,17 @@ static inline void update_count(rbr_node_t *p) // recompute counts from the two 
 	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
 }
 
-// insert $a after $x characters in $rope and return "\sum_{c=0}^{$a-1} C(c) + |{0<=i<$x:$rope[i]==$a}| + 1"
-uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
+// insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
+uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 {
 	rbr_node_t *p, *pa[MAX_HEIGHT];
 	uint64_t z, y, l;
 	int da[MAX_HEIGHT], dir, k, c;
-	rbr_node_t *root = rope->root;
 
-	for (c = 0, z = 0; c < a; ++c) z += root->c[c]>>1; // $z equals the number of symbols smaller than $a
+	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
 	pa[0] = 0, da[0] = 0;
-	for (p = root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
+	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
 		l = rbr_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, z += p->c[a];
 		else dir = 0;
@@ -210,9 +209,9 @@ uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
 		p->c[a] += 2;
 	}
 	p->c[a] += 2; // the leaf count has not been updated
-	z += insert_to_leaf(p, a, x - l) + 1; // +1 to include $rope[$x], which equals $a
+	z += insert_to_leaf(p, a, x - l) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
 	if (p->x[0].n + 2 <= MAX_RUNS) return z;
-	// now we need to split $p and rebalance the red-black rope
+	// we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
 	while (k >= 3 && is_red(pa[k - 1])) {
 		int i = da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
@@ -240,6 +239,14 @@ uint64_t rbr_insert(rbrope6_t *rope, int a, uint64_t x)
 			break;
 		}
 	}
-	set_black(root); // $root is always black
+	set_black(rope->root); // $root is always black
 	return z;
+}
+
+void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str)
+{
+	uint64_t x = rope->root->c[0]>>1;
+	for (--l; l >= 0; --l)
+		x = rbr_insert_symbol(rope, str[l], x);
+	rbr_insert_symbol(rope, 0, x);
 }
