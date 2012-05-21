@@ -41,18 +41,19 @@ int main(int argc, char *argv[])
 	rbrope6_t *rope;
 	gzFile fp;
 	kseq_t *ks;
-	int n, l, c, for_only = 0;
+	int n, l, c, for_only = 0, max_runs = 512;
 	const uint8_t *s;
 	rbriter_t *iter;
 
-	while ((c = getopt(argc, argv, "f")) >= 0)
+	while ((c = getopt(argc, argv, "fm:")) >= 0)
 		if (c == 'f') for_only = 1;
+		else if (c == 'm') max_runs = atoi(optarg);
 	if (optind == argc) {
-		fprintf(stderr, "Usage: ropebwt <in.fq.gz>\n");
+		fprintf(stderr, "Usage: ropebwt [-f] [-m maxRuns=%d] <in.fq.gz>\n", max_runs);
 		return 1;
 	}
 
-	rope = rbr_init();
+	rope = rbr_init(max_runs);
 	fp = gzopen(argv[optind], "rb");
 	ks = kseq_init(fp);
 	while (kseq_read(ks) >= 0) {

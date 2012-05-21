@@ -13,7 +13,7 @@ typedef struct rbriter_s rbriter_t;
 extern "C" {
 #endif
 
-	rbrope6_t *rbr_init(void);
+	rbrope6_t *rbr_init(int max_runs);
 	void rbr_destroy(rbrope6_t *rope);
 	uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x);
 	void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str);

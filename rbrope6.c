@@ -61,7 +61,6 @@ typedef struct rbrnode_s {
 } rbrnode_t;
 
 #define MAX_HEIGHT 80
-#define MAX_RUNS 512 // NB: this MUST BE an even number
 
 #define is_red(_p) ((_p)->c[0]&1)
 #define set_red(_p) ((_p)->c[0] |= 1)
@@ -74,6 +73,7 @@ typedef struct rbrnode_s {
 #define rbr_strlen(_p) (((_p)->c[0]>>1) + ((_p)->c[1]>>1) + ((_p)->c[2]>>1) + ((_p)->c[3]>>1) + ((_p)->c[4]>>1) + ((_p)->c[5]>>1))
 
 struct rbrope6_s {
+	int max_runs;
 	mempool_t *node, *str;
 	rbrnode_t *root;
 };
@@ -87,12 +87,13 @@ static rbrnode_t *rbr_leaf_init(rbrope6_t *rope)
 	return p;
 }
 
-rbrope6_t *rbr_init(void)
+rbrope6_t *rbr_init(int max_runs)
 {
 	rbrope6_t *rope;
 	rope = calloc(1, sizeof(rbrope6_t));
+	rope->max_runs = (max_runs + 1)>>1<<1; // make it an even number
 	rope->node = mp_init(sizeof(rbrnode_t));
-	rope->str  = mp_init(MAX_RUNS);
+	rope->str  = mp_init(max_runs);
 	rope->root = rbr_leaf_init(rope);
 	return rope;
 }
@@ -112,15 +113,15 @@ static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	// compute q[1]
 	q[1] = rbr_leaf_init(rope);
 	s = p->x[1].s;
-	for (i = MAX_RUNS>>1; i < p->x[0].n; ++i) // compute q[1]->c[]
+	for (i = rope->max_runs>>1; i < p->x[0].n; ++i) // compute q[1]->c[]
 		q[1]->c[s[i]&7] += s[i]>>3;
-	memcpy(q[1]->x[1].s, s + (MAX_RUNS>>1), MAX_RUNS>>1); // copy the later half to q[1]
-	memset(s + (MAX_RUNS>>1), 0, MAX_RUNS>>1); // clear the later half
-	q[1]->x[0].n = p->x[0].n - (MAX_RUNS>>1);
+	memcpy(q[1]->x[1].s, s + (rope->max_runs>>1), rope->max_runs>>1); // copy the later half to q[1]
+	memset(s + (rope->max_runs>>1), 0, rope->max_runs>>1); // clear the later half
+	q[1]->x[0].n = p->x[0].n - (rope->max_runs>>1);
 	// compute q[0]
 	q[0] = mp_alloc(rope->node);
 	memcpy(q[0], p, sizeof(rbrnode_t)); // copy everything to q[0], including p->x[0].s and p->c[]
-	q[0]->x[0].n = MAX_RUNS>>1;
+	q[0]->x[0].n = rope->max_runs>>1;
 	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i];
 	// finalize p
 	set_internal(p);
@@ -210,7 +211,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	}
 	p->c[a] += 2; // the leaf count has not been updated
 	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
-	if (p->x[0].n + 2 <= MAX_RUNS) return z;
+	if (p->x[0].n + 2 <= rope->max_runs) return z;
 	// we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
 	while (k >= 3 && is_red(pa[k - 1])) {
