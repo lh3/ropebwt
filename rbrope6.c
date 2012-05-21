@@ -51,16 +51,16 @@ static inline void *mp_alloc(mempool_t *mp)
  *** Red-black rope for DNA ***
  ******************************/
 
-typedef struct rbr_node_s {
+typedef struct rbrnode_s {
 	uint64_t c[6];
 	union {
-		struct rbr_node_s *p; // pointer to children; internal node only
+		struct rbrnode_s *p; // pointer to children; internal node only
 		size_t n; // number of runs; leaf.x[0] only
 		uint8_t *s; // string; leaf.x[1] only
 	} x[2];
-} rbr_node_t;
+} rbrnode_t;
 
-#define MAX_HEIGHT 64
+#define MAX_HEIGHT 80
 #define MAX_RUNS 512 // NB: this MUST BE an even number
 
 #define is_red(_p) ((_p)->c[0]&1)
@@ -73,14 +73,14 @@ typedef struct rbr_node_s {
 
 #define rbr_strlen(_p) (((_p)->c[0]>>1) + ((_p)->c[1]>>1) + ((_p)->c[2]>>1) + ((_p)->c[3]>>1) + ((_p)->c[4]>>1) + ((_p)->c[5]>>1))
 
-struct rbrope_s {
+struct rbrope6_s {
 	mempool_t *node, *str;
-	rbr_node_t *root;
+	rbrnode_t *root;
 };
 
-static rbr_node_t *rbr_leaf_init(rbrope6_t *rope)
+static rbrnode_t *rbr_leaf_init(rbrope6_t *rope)
 {
-	rbr_node_t *p;
+	rbrnode_t *p;
 	p = mp_alloc(rope->node); // $p has been filled with zeros
 	set_leaf(p);
 	p->x[1].s = mp_alloc(rope->str);
@@ -91,7 +91,7 @@ rbrope6_t *rbr_init(void)
 {
 	rbrope6_t *rope;
 	rope = calloc(1, sizeof(rbrope6_t));
-	rope->node = mp_init(sizeof(rbr_node_t));
+	rope->node = mp_init(sizeof(rbrnode_t));
 	rope->str  = mp_init(MAX_RUNS);
 	rope->root = rbr_leaf_init(rope);
 	return rope;
@@ -104,9 +104,9 @@ void rbr_destroy(rbrope6_t *rope)
 	free(rope);
 }
 
-static void split_leaf(rbrope6_t *rope, rbr_node_t *p)
+static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 {
-	rbr_node_t *q[2];
+	rbrnode_t *q[2];
 	uint8_t *s;
 	int i;
 	// compute q[1]
@@ -119,7 +119,7 @@ static void split_leaf(rbrope6_t *rope, rbr_node_t *p)
 	q[1]->x[0].n = p->x[0].n - (MAX_RUNS>>1);
 	// compute q[0]
 	q[0] = mp_alloc(rope->node);
-	memcpy(q[0], p, sizeof(rbr_node_t)); // copy everything to q[0], including p->x[0].s and p->c[]
+	memcpy(q[0], p, sizeof(rbrnode_t)); // copy everything to q[0], including p->x[0].s and p->c[]
 	q[0]->x[0].n = MAX_RUNS>>1;
 	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i];
 	// finalize p
@@ -127,7 +127,7 @@ static void split_leaf(rbrope6_t *rope, rbr_node_t *p)
 	p->x[0].p = q[0]; p->x[1].p = q[1];
 }
 
-static int insert_to_leaf(rbr_node_t *p, int a, int x)
+static int insert_to_leaf(rbrnode_t *p, int a, int x)
 {
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
 
@@ -180,7 +180,7 @@ static int insert_to_leaf(rbr_node_t *p, int a, int x)
 	return r[a];
 }
 
-static inline void update_count(rbr_node_t *p) // recompute counts from the two children; p MUST BE internal
+static inline void update_count(rbrnode_t *p) // recompute counts from the two children; p MUST BE internal
 {
 	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1;
 	p->c[1] = ((p->x[0].p->c[1]>>1) + (p->x[1].p->c[1]>>1))<<1;
@@ -193,7 +193,7 @@ static inline void update_count(rbr_node_t *p) // recompute counts from the two 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
 uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 {
-	rbr_node_t *p, *pa[MAX_HEIGHT];
+	rbrnode_t *p, *pa[MAX_HEIGHT];
 	uint64_t z, y, l;
 	int da[MAX_HEIGHT], dir, k, c;
 
@@ -215,14 +215,14 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	split_leaf(rope, p); set_red(p);
 	while (k >= 3 && is_red(pa[k - 1])) {
 		int i = da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
-		rbr_node_t *r = pa[k - 2]->x[j].p; // $r points to the uncle
+		rbrnode_t *r = pa[k - 2]->x[j].p; // $r points to the uncle
 		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
 			set_black(r);
 			set_black(pa[k - 1]);
 			set_red(pa[k - 2]); // grandparent to red
 			k -= 2;
 		} else {
-			rbr_node_t *t;
+			rbrnode_t *t;
 			if (da[k - 1] != i) { // if the child and the parent are on different sides: 
 				t = pa[k - 1]; // $t: parent node
 				r = t->x[j].p; // $r: sibling node
@@ -249,4 +249,41 @@ void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str)
 	for (--l; l >= 0; --l)
 		x = rbr_insert_symbol(rope, str[l], x);
 	rbr_insert_symbol(rope, 0, x);
+}
+
+struct rbriter_s {
+	const rbrope6_t *rope;
+	const rbrnode_t *pa[MAX_HEIGHT];
+	int k, da[MAX_HEIGHT];
+};
+
+rbriter_t *rbr_iter_init(const rbrope6_t *rope)
+{
+	rbriter_t *iter;
+	const rbrnode_t *p;
+	iter = calloc(1, sizeof(rbriter_t));
+	iter->rope = rope;
+	for (p = rope->root; !is_leaf(p); p = p->x[0].p, ++iter->k) // descend to the left-most leaf
+		iter->pa[iter->k] = p;
+	iter->pa[iter->k] = p; // also add the leaf
+	return iter;
+}
+
+const uint8_t *rbr_iter_next(rbriter_t *iter, int *n)
+{
+	const uint8_t *ret;
+	if (iter->k < 0) return 0;
+	*n = iter->pa[iter->k]->x[0].n;
+	ret = iter->pa[iter->k]->x[1].s;
+	// find the next leaf
+	while (iter->k >= 1 && iter->da[iter->k - 1]) --iter->k;
+	if (--iter->k >= 0) {
+		const rbrnode_t *p = iter->pa[iter->k];
+		iter->da[iter->k] = 1;
+		p = iter->pa[iter->k++] = p->x[1].p;
+		for (; !is_leaf(p); p = p->x[0].p, ++iter->k)
+			iter->pa[iter->k] = p, iter->da[iter->k] = 0;
+		iter->pa[iter->k] = p;
+	}
+	return ret;
 }
