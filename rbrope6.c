@@ -55,12 +55,12 @@ static inline void *mp_alloc(mempool_t *mp)
 #define MAX_RUNLEN 31
 
 typedef struct rbrnode_s {
-	uint64_t c[6];
-	union {
+	union { // IMPORTANT: always make sure x[0].p is the first member; otherwise rb-tree rebalancing will fail
 		struct rbrnode_s *p; // pointer to children; internal node only
 		size_t n; // number of runs; leaf.x[0] only
 		uint8_t *s; // string; leaf.x[1] only
 	} x[2];
+	uint64_t c[6];
 } rbrnode_t;
 
 #define is_red(_p) ((_p)->c[0]&1)
@@ -202,7 +202,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	fprintf(stderr, "%c,%lld\n", "$ACGTN"[a], x);
 	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
-	pa[0] = rope->root, da[0] = -1;
+	da[0] = 0; pa[0] = (rbrnode_t*)&rope->root; // this is a trick learnt from libavl
 	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
 		l = rbr_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, z += p->c[a]>>1;
@@ -238,7 +238,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 			set_black(r);
 			t->x[i].p = r->x[j].p; update_count(t);
 			r->x[j].p = t; update_count(r);
-			pa[k - 3]->x[da[k - 3]].p = r;
+			pa[k - 3]->x[da[k - 3]].p = r; // when k==3, this line will automatically change the root
 			break;
 		}
 	}
