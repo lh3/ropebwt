@@ -251,10 +251,10 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 				pa[k - 2]->x[i].p = r;
 			} else r = pa[k - 1];
 			t = pa[k - 2];
-			set_red(t);
-			set_black(r);
 			t->x[i].p = r->x[j].p; update_count(t);
 			r->x[j].p = t; update_count(r);
+			set_red(t);
+			set_black(r);
 			pa[k - 3]->x[da[k - 3]].p = r; // when k==3, this line will automatically change the root
 			break;
 		}
