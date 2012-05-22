@@ -52,7 +52,7 @@ static inline void *mp_alloc(mempool_t *mp)
  ******************************/
 
 #define MAX_HEIGHT 80
-#define MAX_RUNLEN 31
+#define MAX_RUNLEN 5
 
 typedef struct rbrnode_s {
 	union { // IMPORTANT: always make sure x[0].p is the first member; otherwise rb-tree rebalancing will fail
@@ -147,6 +147,7 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		l += c>>3;
 		r[c&7] += c>>3;
 	} while (l < x);
+	if (i > p->x[0].n) fprintf(stderr, "%d,%d; %d,%d\n", l, x, i, (int)p->x[0].n);
 	assert(i <= p->x[0].n);
 	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
 	if (l == x && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
@@ -163,7 +164,7 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 	} else if (i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
 		int i0 = i, rest = l - x, c = s[i]&7;
 		s[i] -= rest<<3;
-		for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
+		for (++i; i != p->x[0].n && (s[i]&7) == c; ++i); // find the end of the long run
 		--i;
 		if ((s[i]>>3) + rest > MAX_RUNLEN) { // we cannot put $rest to $s[$i]
 			rest = (s[i]>>3) + rest - MAX_RUNLEN;
@@ -229,7 +230,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	}
 	p->c[a] += 2; // the leaf count has not been updated
 	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
-	printf("%c,%lld\t", "$ACGTN"[a], x); rbr_print_tree(rope->root, rope->root); fflush(stdout);
+//	printf("%c,%lld\t", "$ACGTN"[a], x); rbr_print_tree(rope->root, rope->root); fflush(stdout);
 	if (p->x[0].n + 2 <= rope->max_runs) return z;
 	// we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
@@ -260,7 +261,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 		}
 	}
 	set_black(rope->root); // $root is always black
-	printf("***\t"); rbr_print_tree(rope->root, rope->root); fflush(stdout);
+//	printf("***\t"); rbr_print_tree(rope->root, rope->root); fflush(stdout);
 	return z;
 }
 

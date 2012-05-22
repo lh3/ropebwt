@@ -41,7 +41,7 @@ int main(int argc, char *argv[])
 	rbrope6_t *rope;
 	gzFile fp;
 	kseq_t *ks;
-	int n, l, c, for_only = 0, max_runs = 512;
+	int n, l, c, for_only = 0, max_runs = 256;
 	const uint8_t *s;
 	rbriter_t *iter;
 
@@ -49,6 +49,12 @@ int main(int argc, char *argv[])
 		if (c == 'f') for_only = 1;
 		else if (c == 'm') max_runs = atoi(optarg);
 	if (optind == argc) {
+	/*
+		rope = rbr_init(max_runs);
+		for (l = 0; l < 11; ++l)
+			rbr_insert_symbol(rope, 2, 0);
+		rbr_insert_symbol(rope, 3, 2);
+	*/
 		fprintf(stderr, "Usage: ropebwt [-f] [-m maxRuns=%d] <in.fq.gz>\n", max_runs);
 		return 1;
 	}
@@ -71,12 +77,13 @@ int main(int argc, char *argv[])
 	iter = rbr_iter_init(rope);
 	while ((s = rbr_iter_next(iter, &n, &l)) != 0) {
 		int i, j;
-		printf("%d\t%d\t", n, l);
+//		printf("%d\t%d\t", n, l);
 		for (i = 0; i < n; ++i)
 			for (j = 0; j < s[i]>>3; ++j)
 				putchar("$ACGTN"[s[i]&7]);
-		putchar('\n');
+//		putchar('\n');
 	}
+	putchar('\n');
 	rbr_destroy(rope);
 	return 0;
 }
