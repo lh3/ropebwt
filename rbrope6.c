@@ -201,9 +201,9 @@ static void rbr_print_node(const rbrnode_t *p)
 				putchar("$ACGTN"[s[i]&7]);
 	} else {
 		putchar('(');
-		rbr_print_node(p->x[0].p, root);
+		rbr_print_node(p->x[0].p);
 		putchar(',');
-		rbr_print_node(p->x[1].p, root);
+		rbr_print_node(p->x[1].p);
 		putchar(')'); putchar("br"[is_red(p)]);
 	}
 }
