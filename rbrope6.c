@@ -183,7 +183,7 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 
 static inline void update_count(rbrnode_t *p) // recompute counts from the two children; p MUST BE internal
 {
-	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1;
+	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1 | (p->c[0]&1);
 	p->c[1] = ((p->x[0].p->c[1]>>1) + (p->x[1].p->c[1]>>1))<<1;
 	p->c[2] = ((p->x[0].p->c[2]>>1) + (p->x[1].p->c[2]>>1))<<1;
 	p->c[3] = ((p->x[0].p->c[3]>>1) + (p->x[1].p->c[3]>>1))<<1;
@@ -251,10 +251,10 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 				pa[k - 2]->x[i].p = r;
 			} else r = pa[k - 1];
 			t = pa[k - 2];
-			t->x[i].p = r->x[j].p; update_count(t);
-			r->x[j].p = t; update_count(r);
 			set_red(t);
 			set_black(r);
+			t->x[i].p = r->x[j].p; update_count(t);
+			r->x[j].p = t; update_count(r);
 			pa[k - 3]->x[da[k - 3]].p = r; // when k==3, this line will automatically change the root
 			break;
 		}
