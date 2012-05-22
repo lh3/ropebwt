@@ -92,9 +92,10 @@ rbrope6_t *rbr_init(int max_runs)
 {
 	rbrope6_t *rope;
 	rope = calloc(1, sizeof(rbrope6_t));
+	if (max_runs < 4) max_runs = 4;
 	rope->max_runs = (max_runs + 1)>>1<<1; // make it an even number
 	rope->node = mp_init(sizeof(rbrnode_t));
-	rope->str  = mp_init(max_runs);
+	rope->str  = mp_init(rope->max_runs);
 	rope->root = rbr_leaf_init(rope);
 	return rope;
 }
@@ -157,11 +158,9 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 				_insert_after(p->x[0].n, s, i, 1<<3|a);
 			} else s[i] += 1<<3;
 		} else s[i] += 1<<3;
-	} else if (i == p->x[0].n - 1) { // the end of block
-		s[p->x[0].n++] = 1<<3 | a;
 	} else if (l == x) { // insert to the end of run; in this case, neither this and the next run is $a
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
-	} else if ((s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run; note that $i<$n-1 always stands
+	} else if (i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
 		int i0 = i, rest = l - x, c = s[i]&7;
 		s[i] -= rest<<3;
 		for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
@@ -254,6 +253,23 @@ void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str)
 	rbr_insert_symbol(rope, 0, x);
 }
 
+void rbr_debug(rbrnode_t *p)
+{
+	if (is_leaf(p)) {
+		int i, j;
+		uint8_t *s = p->x[1].s;
+		for (i = 0; i < p->x[0].n; ++i)
+			for (j = 0; j < s[i]>>3; ++j)
+				putchar("$ACGTN"[s[i]&7]);
+	} else {
+		putchar('(');
+		rbr_debug(p->x[0].p);
+		putchar(',');
+		rbr_debug(p->x[1].p);
+		putchar(')');
+	}
+}
+
 struct rbriter_s {
 	const rbrope6_t *rope;
 	const rbrnode_t *pa[MAX_HEIGHT];
@@ -264,6 +280,7 @@ rbriter_t *rbr_iter_init(const rbrope6_t *rope)
 {
 	rbriter_t *iter;
 	const rbrnode_t *p;
+	rbr_debug(rope->root); putchar('\n');
 	iter = calloc(1, sizeof(rbriter_t));
 	iter->rope = rope;
 	for (p = rope->root; !is_leaf(p); p = p->x[0].p, ++iter->k) // descend to the left-most leaf
