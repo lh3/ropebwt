@@ -52,13 +52,13 @@ static inline void *mp_alloc(mempool_t *mp)
  ******************************/
 
 #define MAX_HEIGHT 80
-#define MAX_RUNLEN 5
+#define MAX_RUNLEN 31
 
 typedef struct rbrnode_s {
 	union { // IMPORTANT: always make sure x[0].p is the first member; otherwise rb-tree rebalancing will fail
 		struct rbrnode_s *p; // pointer to children; internal node only
-		size_t n; // number of runs; leaf.x[0] only
 		uint8_t *s; // string; leaf.x[1] only
+		int n; // number of runs; leaf.x[0] only
 	} x[2];
 	uint64_t c[6];
 } rbrnode_t;
@@ -147,7 +147,6 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		l += c>>3;
 		r[c&7] += c>>3;
 	} while (l < x);
-	if (i > p->x[0].n) fprintf(stderr, "%d,%d; %d,%d\n", l, x, i, (int)p->x[0].n);
 	assert(i <= p->x[0].n);
 	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
 	if (l == x && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
@@ -161,17 +160,17 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		} else s[i] += 1<<3;
 	} else if (l == x) { // insert to the end of run; in this case, neither this and the next run is $a
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
-	} else if (i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
-		int i0 = i, rest = l - x, c = s[i]&7;
+	} else if (1 && i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
+		int rest = l - x, c = s[i]&7;
 		s[i] -= rest<<3;
-		for (++i; i != p->x[0].n && (s[i]&7) == c; ++i); // find the end of the long run
+		_insert_after(p->x[0].n, s, i, 1<<3 | a);
+		for (i += 2; i != p->x[0].n && (s[i]&7) == c; ++i); // find the end of the long run
 		--i;
 		if ((s[i]>>3) + rest > MAX_RUNLEN) { // we cannot put $rest to $s[$i]
 			rest = (s[i]>>3) + rest - MAX_RUNLEN;
-			s[i] |= MAX_RUNLEN<<3;
+			s[i] = MAX_RUNLEN<<3 | (s[i]&7);
 			_insert_after(p->x[0].n, s, i, rest<<3 | c);
 		} else s[i] += rest<<3;
-		_insert_after(p->x[0].n, s, i0, 1<<3 | a);
 	} else { // insert to a short run
 		memmove(s + i + 3, s + i + 1, p->x[0].n - i - 1);
 		s[i]  -= (l-x)<<3;
@@ -192,7 +191,7 @@ static inline void update_count(rbrnode_t *p) // recompute counts from the two c
 	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
 }
 
-static void rbr_print_tree(const rbrnode_t *p, const rbrnode_t *root)
+static void rbr_print_node(const rbrnode_t *p)
 {
 	if (is_leaf(p)) {
 		int i, j;
@@ -202,13 +201,14 @@ static void rbr_print_tree(const rbrnode_t *p, const rbrnode_t *root)
 				putchar("$ACGTN"[s[i]&7]);
 	} else {
 		putchar('(');
-		rbr_print_tree(p->x[0].p, root);
+		rbr_print_node(p->x[0].p, root);
 		putchar(',');
-		rbr_print_tree(p->x[1].p, root);
+		rbr_print_node(p->x[1].p, root);
 		putchar(')'); putchar("br"[is_red(p)]);
 	}
-	if (p == root) putchar('\n');
 }
+
+void rbr_print(const rbrope6_t *rope) { rbr_print_node(rope->root); putchar('\n'); }
 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
 uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
@@ -230,7 +230,6 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	}
 	p->c[a] += 2; // the leaf count has not been updated
 	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
-//	printf("%c,%lld\t", "$ACGTN"[a], x); rbr_print_tree(rope->root, rope->root); fflush(stdout);
 	if (p->x[0].n + 2 <= rope->max_runs) return z;
 	// we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
@@ -261,7 +260,6 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 		}
 	}
 	set_black(rope->root); // $root is always black
-//	printf("***\t"); rbr_print_tree(rope->root, rope->root); fflush(stdout);
 	return z;
 }
 

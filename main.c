@@ -49,12 +49,6 @@ int main(int argc, char *argv[])
 		if (c == 'f') for_only = 1;
 		else if (c == 'm') max_runs = atoi(optarg);
 	if (optind == argc) {
-	/*
-		rope = rbr_init(max_runs);
-		for (l = 0; l < 11; ++l)
-			rbr_insert_symbol(rope, 2, 0);
-		rbr_insert_symbol(rope, 3, 2);
-	*/
 		fprintf(stderr, "Usage: ropebwt [-f] [-m maxRuns=%d] <in.fq.gz>\n", max_runs);
 		return 1;
 	}

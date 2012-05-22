@@ -18,6 +18,7 @@ extern "C" {
 	uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x);
 	void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str);
 	void rbr_get_counts(rbrope6_t *rope, uint64_t c[6]);
+	void rbr_print(const rbrope6_t *rope);
 
 	rbriter_t *rbr_iter_init(const rbrope6_t *rope); // to free, simply call free()
 	const uint8_t *rbr_iter_next(rbriter_t *iter, int *n, int *l);
