@@ -51,6 +51,9 @@ static inline void *mp_alloc(mempool_t *mp)
  *** Red-black rope for DNA ***
  ******************************/
 
+#define MAX_HEIGHT 80
+#define MAX_RUNLEN 31
+
 typedef struct rbrnode_s {
 	uint64_t c[6];
 	union {
@@ -59,8 +62,6 @@ typedef struct rbrnode_s {
 		uint8_t *s; // string; leaf.x[1] only
 	} x[2];
 } rbrnode_t;
-
-#define MAX_HEIGHT 80
 
 #define is_red(_p) ((_p)->c[0]&1)
 #define set_red(_p) ((_p)->c[0] |= 1)
@@ -118,7 +119,7 @@ static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	memset(s + (rope->max_runs>>1), 0, rope->max_runs>>1); // clear the later half
 	q[1]->x[0].n = p->x[0].n - (rope->max_runs>>1);
 	for (i = 0, s = q[1]->x[1].s; i < q[1]->x[0].n; ++i) // compute q[1]->c[]
-		q[1]->c[s[i]&7] += s[i]>>3;
+		q[1]->c[s[i]&7] += s[i]>>3<<1;
 	// compute q[0]
 	memcpy(q[0], p, sizeof(rbrnode_t)); // copy everything to q[0], including p->x[0].s and p->c[]
 	q[0]->x[0].n = rope->max_runs>>1;
@@ -149,10 +150,10 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
 	if (l == x && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
 	if ((s[i]&7) == a) { // insert to a long $a run
-		if (s[i]>>3 == 31) { // the run is full
+		if (s[i]>>3 == MAX_RUNLEN) { // the run is full
 			for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
 			--i;
-			if (s[i]>>3 == 31) { // then we have to add one run
+			if (s[i]>>3 == MAX_RUNLEN) { // then we have to add one run
 				_insert_after(p->x[0].n, s, i, 1<<3|a);
 			} else s[i] += 1<<3;
 		} else s[i] += 1<<3;
@@ -165,9 +166,9 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		s[i] -= rest<<3;
 		for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
 		--i;
-		if ((s[i]>>3) + rest > 31) { // we cannot put $rest to $s[$i]
-			rest = (s[i]>>3) + rest - 31;
-			s[i] |= 31<<3;
+		if ((s[i]>>3) + rest > MAX_RUNLEN) { // we cannot put $rest to $s[$i]
+			rest = (s[i]>>3) + rest - MAX_RUNLEN;
+			s[i] |= MAX_RUNLEN<<3;
 			_insert_after(p->x[0].n, s, i, rest<<3 | c);
 		} else s[i] += rest<<3;
 		_insert_after(p->x[0].n, s, i0, 1<<3 | a);
@@ -204,7 +205,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	pa[0] = rope->root, da[0] = -1;
 	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
 		l = rbr_strlen(p->x[0].p);
-		if (x > l + y) dir = 1, y += l, z += p->c[a];
+		if (x > l + y) dir = 1, y += l, z += p->c[a]>>1;
 		else dir = 0;
 		pa[k] = p;
 		da[k++] = dir;
