@@ -253,21 +253,22 @@ void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str)
 	rbr_insert_symbol(rope, 0, x);
 }
 
-void rbr_debug(rbrnode_t *p)
+static void rbr_print_tree(const rbrnode_t *p, const rbrnode_t *root)
 {
 	if (is_leaf(p)) {
 		int i, j;
-		uint8_t *s = p->x[1].s;
+		const uint8_t *s = p->x[1].s;
 		for (i = 0; i < p->x[0].n; ++i)
 			for (j = 0; j < s[i]>>3; ++j)
 				putchar("$ACGTN"[s[i]&7]);
 	} else {
 		putchar('(');
-		rbr_debug(p->x[0].p);
+		rbr_print_tree(p->x[0].p, root);
 		putchar(',');
-		rbr_debug(p->x[1].p);
+		rbr_print_tree(p->x[1].p, root);
 		putchar(')');
 	}
+	if (p == root) putchar('\n');
 }
 
 struct rbriter_s {
@@ -280,7 +281,7 @@ rbriter_t *rbr_iter_init(const rbrope6_t *rope)
 {
 	rbriter_t *iter;
 	const rbrnode_t *p;
-	rbr_debug(rope->root); putchar('\n');
+	rbr_print_tree(rope->root, rope->root);
 	iter = calloc(1, sizeof(rbriter_t));
 	iter->rope = rope;
 	for (p = rope->root; !is_leaf(p); p = p->x[0].p, ++iter->k) // descend to the left-most leaf
