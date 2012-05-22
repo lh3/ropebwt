@@ -205,7 +205,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	da[0] = 0; pa[0] = (rbrnode_t*)&rope->root; // this is a trick learnt from libavl
 	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
 		l = rbr_strlen(p->x[0].p);
-		if (x > l + y) dir = 1, y += l, z += p->c[a]>>1;
+		if (x > l + y) dir = 1, y += l, z += p->x[0].p->c[a]>>1;
 		else dir = 0;
 		pa[k] = p;
 		da[k++] = dir;
