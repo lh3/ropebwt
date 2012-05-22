@@ -107,7 +107,7 @@ void rbr_destroy(rbrope6_t *rope)
 	free(rope);
 }
 
-static void split_leaf(rbrope6_t *rope, rbrnode_t *p)
+static inline void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 {
 	rbrnode_t *q[2];
 	uint8_t *s;
@@ -160,7 +160,7 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		} else s[i] += 1<<3;
 	} else if (l == x) { // insert to the end of run; in this case, neither this and the next run is $a
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
-	} else if (1 && i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
+	} else if (i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
 		int rest = l - x, c = s[i]&7;
 		s[i] -= rest<<3;
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
@@ -228,6 +228,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 		da[k++] = dir;
 		p->c[a] += 2;
 	}
+	assert(k < MAX_HEIGHT);
 	p->c[a] += 2; // the leaf count has not been updated
 	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
 	if (p->x[0].n + 2 <= rope->max_runs) return z;

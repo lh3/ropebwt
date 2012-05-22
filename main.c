@@ -41,12 +41,13 @@ int main(int argc, char *argv[])
 	rbrope6_t *rope;
 	gzFile fp;
 	kseq_t *ks;
-	int n, l, c, for_only = 0, max_runs = 256;
+	int n, l, c, for_only = 0, print_rope = 0, max_runs = 256;
 	const uint8_t *s;
 	rbriter_t *iter;
 
-	while ((c = getopt(argc, argv, "fm:")) >= 0)
+	while ((c = getopt(argc, argv, "Tfm:")) >= 0)
 		if (c == 'f') for_only = 1;
+		else if (c == 'T') print_rope = 1;
 		else if (c == 'm') max_runs = atoi(optarg);
 	if (optind == argc) {
 		fprintf(stderr, "Usage: ropebwt [-f] [-m maxRuns=%d] <in.fq.gz>\n", max_runs);
@@ -78,6 +79,7 @@ int main(int argc, char *argv[])
 //		putchar('\n');
 	}
 	putchar('\n');
+	if (print_rope) rbr_print(rope);
 	rbr_destroy(rope);
 	return 0;
 }
