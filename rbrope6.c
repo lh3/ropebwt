@@ -191,6 +191,24 @@ static inline void update_count(rbrnode_t *p) // recompute counts from the two c
 	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
 }
 
+static void rbr_print_tree(const rbrnode_t *p, const rbrnode_t *root)
+{
+	if (is_leaf(p)) {
+		int i, j;
+		const uint8_t *s = p->x[1].s;
+		for (i = 0; i < p->x[0].n; ++i)
+			for (j = 0; j < s[i]>>3; ++j)
+				putchar("$ACGTN"[s[i]&7]);
+	} else {
+		putchar('(');
+		rbr_print_tree(p->x[0].p, root);
+		putchar(',');
+		rbr_print_tree(p->x[1].p, root);
+		putchar(')'); putchar("br"[is_red(p)]);
+	}
+	if (p == root) putchar('\n');
+}
+
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
 uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 {
@@ -198,7 +216,6 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	uint64_t z, y, l;
 	int da[MAX_HEIGHT], dir, k, c;
 
-	fprintf(stderr, "%c,%lld\n", "$ACGTN"[a], x);
 	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
 	// pinpoint the node where $a is inserted
 	da[0] = 0; pa[0] = (rbrnode_t*)&rope->root; // this is a trick learnt from libavl
@@ -212,6 +229,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 	}
 	p->c[a] += 2; // the leaf count has not been updated
 	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
+	printf("%c,%lld\t", "$ACGTN"[a], x); rbr_print_tree(rope->root, rope->root); fflush(stdout);
 	if (p->x[0].n + 2 <= rope->max_runs) return z;
 	// we need to split $p and rebalance the red-black rope
 	split_leaf(rope, p); set_red(p);
@@ -242,6 +260,7 @@ uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 		}
 	}
 	set_black(rope->root); // $root is always black
+	printf("***\t"); rbr_print_tree(rope->root, rope->root); fflush(stdout);
 	return z;
 }
 
@@ -251,24 +270,6 @@ void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str)
 	for (--l; l >= 0; --l)
 		x = rbr_insert_symbol(rope, str[l], x);
 	rbr_insert_symbol(rope, 0, x);
-}
-
-static void rbr_print_tree(const rbrnode_t *p, const rbrnode_t *root)
-{
-	if (is_leaf(p)) {
-		int i, j;
-		const uint8_t *s = p->x[1].s;
-		for (i = 0; i < p->x[0].n; ++i)
-			for (j = 0; j < s[i]>>3; ++j)
-				putchar("$ACGTN"[s[i]&7]);
-	} else {
-		putchar('(');
-		rbr_print_tree(p->x[0].p, root);
-		putchar(',');
-		rbr_print_tree(p->x[1].p, root);
-		putchar(')');
-	}
-	if (p == root) putchar('\n');
 }
 
 struct rbriter_s {
@@ -281,7 +282,6 @@ rbriter_t *rbr_iter_init(const rbrope6_t *rope)
 {
 	rbriter_t *iter;
 	const rbrnode_t *p;
-	rbr_print_tree(rope->root, rope->root);
 	iter = calloc(1, sizeof(rbriter_t));
 	iter->rope = rope;
 	for (p = rope->root; !is_leaf(p); p = p->x[0].p, ++iter->k) // descend to the left-most leaf
