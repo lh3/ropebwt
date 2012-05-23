@@ -290,11 +290,10 @@ rbriter_t *rbr_iter_init(const rbrope6_t *rope)
 	return iter;
 }
 
-const uint8_t *rbr_iter_next(rbriter_t *iter, int *n, int *l)
+const uint8_t *rbr_iter_next(rbriter_t *iter, int *n)
 {
 	const uint8_t *ret;
 	if (iter->k < 0) return 0;
-	*l = rbr_strlen(iter->pa[iter->k]);
 	*n = iter->pa[iter->k]->x[0].n;
 	ret = iter->pa[iter->k]->x[1].s;
 	// find the next leaf

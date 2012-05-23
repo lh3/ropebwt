@@ -21,7 +21,7 @@ extern "C" {
 	void rbr_print(const rbrope6_t *rope);
 
 	rbriter_t *rbr_iter_init(const rbrope6_t *rope); // to free, simply call free()
-	const uint8_t *rbr_iter_next(rbriter_t *iter, int *n, int *l);
+	const uint8_t *rbr_iter_next(rbriter_t *iter, int *n);
 
 #ifdef __cplusplus
 }
