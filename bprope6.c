@@ -143,9 +143,9 @@ static inline bpr_node_t *split_node(bprope6_t *rope, bpr_node_t *u, bpr_node_t 
 	bpr_node_t *w; // this is the uncle
 	if (u == 0) { // only happens at the root
 		u = v = mp_alloc(rope->node);
-		v->n = 1; v->p = rope->root; v->is_bottom = 0;
+		v->n = 1; v->p = rope->root;
 		memcpy(v->c, rope->c, 48);
-		for (j = 0, v->l = 0; j < 6; ++j) v->l += v->c[j];
+		for (j = 0; j < 6; ++j) v->l += v->c[j];
 		rope->root = v;
 	}
 	if (i != u->n - 1)
@@ -163,10 +163,10 @@ static inline bpr_node_t *split_node(bprope6_t *rope, bpr_node_t *u, bpr_node_t 
 			w->c[q[i]&7] += q[i]>>3;
 	} else {
 		bpr_node_t *p = v->p, *q = w->p; // $p and $q are cousins
+		p->n -= rope->max_nodes>>1;
+		memcpy(q, p + p->n, sizeof(bpr_node_t) * (rope->max_nodes>>1));
 		q->n = rope->max_nodes>>1;
-		p->n -= q->n;
 		q->is_bottom = p->is_bottom;
-		memcpy(q, p + p->n, sizeof(bpr_node_t) * q->n);
 		for (i = 0; i < q->n; ++i)
 			for (j = 0; j < 6; ++j)
 				w->c[j] += q[i].c[j];
@@ -187,7 +187,7 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 		if (p->n == rope->max_nodes) { // node is full; split
 			v = split_node(rope, u, v);
 			if (y + v->l < x)
-				y += p->l, z += p->c[a], p = v[1].p;
+				y += v->l, z += v->c[a], p = v[1].p;
 		}
 		for (u = p; y + p->l < x; ++p) y += p->l, z += p->c[a];
 		++p->c[a]; ++p->l;
