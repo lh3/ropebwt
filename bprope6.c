@@ -187,12 +187,14 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 		if (p->n == rope->max_nodes) { // node is full; split
 			v = split_node(rope, u, v);
 			if (y + v->l < x)
-				y += v->l, z += v->c[a], p = v[1].p;
+				y += v->l, z += v->c[a], ++v, p = v->p;
 		}
 		for (u = p; y + p->l < x; ++p) y += p->l, z += p->c[a];
-		++p->c[a]; ++p->l;
+		assert(p - u < u->n);
+		if (v) ++v->c[a], ++v->l; // we should not change p->c[a] because when this will lead to problems when p's child is split
 		v = p; p = p->p;
 	} while (!u->is_bottom);
+	++v->c[a]; ++v->l;
 	++rope->c[a];
 	z += insert_to_leaf((uint8_t*)p, a, x - y) + 1;
 	if (*(uint32_t*)p + 2 > rope->max_runs)
