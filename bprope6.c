@@ -48,7 +48,7 @@ static int insert_to_leaf(uint8_t *p, int a, int x)
 #define MAX_RUNLEN 31
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
 
-	int r[6], i, l, n = *(int32_t*)p;
+	int r[6], i, l = 0, n = *(int32_t*)p;
 	uint8_t *s = p + 4;
 	if (n == 0) { // if $s is empty, that is easy
 		s[n++] = 1<<3 | a;
@@ -56,12 +56,12 @@ static int insert_to_leaf(uint8_t *p, int a, int x)
 		return 0;
 	}
 	memset(r, 0, 24);
-	i = l = 0;
 	do { // this loop is likely to be the bottleneck
-		register int c = s[i++];
-		l += c>>3;
-		r[c&7] += c>>3;
+		l += *s>>3;
+		r[*s&7] += *s>>3;
+		++s;
 	} while (l < x);
+	i = s - p - 4; s = p + 4;
 	assert(i <= n);
 	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
 	if (l == x && i != n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
