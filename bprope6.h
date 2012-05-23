@@ -20,7 +20,7 @@ extern "C" {
 	void bpr_print(const bprope6_t *rope);
 
 	bpriter_t *bpr_iter_init(const bprope6_t *rope); // to free, simply call free()
-	const uint8_t *bpr_iter_next(bpriter_t *iter, int *n, int *l);
+	const uint8_t *bpr_iter_next(bpriter_t *iter, int *n);
 
 #ifdef __cplusplus
 }

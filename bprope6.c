@@ -199,7 +199,7 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 	z += insert_to_leaf((uint8_t*)p, a, x - y) + 1;
 	if (*(uint32_t*)p + 2 > rope->max_runs)
 		split_node(rope, u, v);
-	printf("%c,%lld\t", "$ACGTN"[a], x); bpr_print(rope); fflush(stdout);
+//	printf("%c,%lld\t", "$ACGTN"[a], x); bpr_print(rope); fflush(stdout);
 	return z;
 }
 
@@ -234,42 +234,33 @@ void bpr_destroy(bprope6_t *rope)
 	free(rope);
 }
 
-/*
+#define MAX_HEIGHT 80
+
 struct bpriter_s {
 	const bprope6_t *rope;
 	const bpr_node_t *pa[MAX_HEIGHT];
-	int k, da[MAX_HEIGHT];
+	int k, ia[MAX_HEIGHT];
 };
 
 bpriter_t *bpr_iter_init(const bprope6_t *rope)
 {
-	bpriter_t *iter;
-	const bpr_node_t *p;
-	iter = calloc(1, sizeof(bpriter_t));
-	iter->rope = rope;
-	for (p = rope->root; !is_leaf(p); p = p->x[0].p, ++iter->k) // descend to the left-most leaf
-		iter->pa[iter->k] = p;
-	iter->pa[iter->k] = p; // also add the leaf
-	return iter;
+	bpriter_t *i;
+	i = calloc(1, sizeof(bpriter_t));
+	i->rope = rope;
+	for (i->pa[i->k] = rope->root; !i->pa[i->k]->is_bottom;) // descend to the leftmost leaf
+		++i->k, i->pa[i->k] = i->pa[i->k - 1]->p;
+	return i;
 }
 
-const uint8_t *bpr_iter_next(bpriter_t *iter, int *n, int *l)
+const uint8_t *bpr_iter_next(bpriter_t *i, int *n)
 {
 	const uint8_t *ret;
-	if (iter->k < 0) return 0;
-	*l = bpr_strlen(iter->pa[iter->k]);
-	*n = iter->pa[iter->k]->x[0].n;
-	ret = iter->pa[iter->k]->x[1].s;
-	// find the next leaf
-	while (iter->k >= 1 && iter->da[iter->k - 1]) --iter->k;
-	if (--iter->k >= 0) {
-		const bpr_node_t *p = iter->pa[iter->k];
-		iter->da[iter->k] = 1;
-		p = iter->pa[iter->k++] = p->x[1].p;
-		for (; !is_leaf(p); p = p->x[0].p, ++iter->k)
-			iter->pa[iter->k] = p, iter->da[iter->k] = 0;
-		iter->pa[iter->k] = p;
-	}
+	if (i->k < 0) return 0;
+	*n = *(int32_t*)i->pa[i->k][i->ia[i->k]].p;
+	ret = (uint8_t*)i->pa[i->k][i->ia[i->k]].p + 4;
+	while (i->k >= 0 && ++i->ia[i->k] == i->pa[i->k]->n) i->ia[i->k--] = 0; // backtracking
+	if (i->k >= 0)
+		while (!i->pa[i->k]->is_bottom) // descend to the leftmost leaf
+			++i->k, i->pa[i->k] = i->pa[i->k - 1][i->ia[i->k - 1]].p;
 	return ret;
 }
-*/
