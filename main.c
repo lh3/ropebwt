@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
 	bprope6_t *bpr = 0;
 	gzFile fp;
 	kseq_t *ks;
-	int c, i, j, for_only = 0, print_rope = 0, max_runs = 256, max_nodes = 32;
+	int c, i, j, for_only = 0, print_rope = 0, max_runs = 512, max_nodes = 64;
 	const uint8_t *s;
 
 	while ((c = getopt(argc, argv, "Tfr:n:")) >= 0)
