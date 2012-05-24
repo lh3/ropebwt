@@ -4,10 +4,10 @@
 #include <stdio.h>
 #include "bprope6.h"
 
-#define MP_N_ELEMS 0x10000
+#define MP_CHUNK_SIZE 0x800000 // 8MB per chunk
 
-typedef struct {
-	int size, i;
+typedef struct { // memory pool for fast and compact memory allocation (no free)
+	int size, i, n_elems;
 	int64_t top, max;
 	uint8_t **mem;
 } mempool_t;
@@ -17,7 +17,7 @@ static mempool_t *mp_init(int size)
 	mempool_t *mp;
 	mp = calloc(1, sizeof(mempool_t));
 	mp->size = size;
-	mp->i = MP_N_ELEMS;
+	mp->i = mp->n_elems = MP_CHUNK_SIZE / size;
 	mp->top = -1;
 	return mp;
 }
@@ -25,19 +25,18 @@ static mempool_t *mp_init(int size)
 static void mp_destroy(mempool_t *mp)
 {
 	int64_t i;
-	for (i = 0; i <= mp->top; ++i)
-		free(mp->mem[i]);
+	for (i = 0; i <= mp->top; ++i) free(mp->mem[i]);
 	free(mp->mem); free(mp);
 }
 
 static inline void *mp_alloc(mempool_t *mp)
 {
-	if (mp->i == MP_N_ELEMS) {
+	if (mp->i == mp->n_elems) {
 		if (++mp->top == mp->max) {
 			mp->max = mp->max? mp->max<<1 : 1;
 			mp->mem = realloc(mp->mem, sizeof(void*) * mp->max);
 		}
-		mp->mem[mp->top] = calloc(MP_N_ELEMS, mp->size);
+		mp->mem[mp->top] = calloc(mp->n_elems, mp->size);
 		mp->i = 0;
 	}
 	return mp->mem[mp->top] + (mp->i++) * mp->size;
@@ -212,8 +211,7 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 	++rope->c[a]; // $rope->c should be updated after the loop as adding a new root needs the old $rope->c counts
 	z += insert_to_leaf((uint8_t*)p, a, x - y, v->l, v->c) + 1;
 	++v->c[a]; ++v->l; // this should be below insert_to_leaf(); otherwise insert_to_leaf() will not work
-	if (*(uint32_t*)p + 2 > rope->max_runs)
-		split_node(rope, u, v);
+	if (*(uint32_t*)p + 2 > rope->max_runs) split_node(rope, u, v);
 	return z;
 }
 
