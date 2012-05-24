@@ -43,7 +43,7 @@ static inline void *mp_alloc(mempool_t *mp)
 	return mp->mem[mp->top] + (mp->i++) * mp->size;
 }
 
-static int insert_to_leaf(uint8_t *p, int a, int x)
+static int insert_to_leaf(uint8_t *p, int a, int x, int len, uint64_t c[6])
 { // insert $a after $x symbols in $p; IMPORTANT: the first 4 bytes of $p gives the length of the string
 #define MAX_RUNLEN 31
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
@@ -55,12 +55,23 @@ static int insert_to_leaf(uint8_t *p, int a, int x)
 		*(int32_t*)p = n;
 		return 0;
 	}
-	memset(r, 0, 24);
-	do { // this loop is likely to be the bottleneck
-		l += *s>>3;
-		r[*s&7] += *s>>3;
-		++s;
-	} while (l < x);
+	if (x < len>>1) { // forwardly search for the run to insert
+		for (i = 0; i < 6; ++i) r[i] = 0;
+		do {
+			l += *s>>3;
+			r[*s&7] += *s>>3;
+			++s;
+		} while (l < x);
+	} else { // backwardly search for the run to insert; this block has exactly the same functionality as the above
+		for (i = 0; i < 6; ++i) r[i] = c[i];
+		l = len, s += n;
+		do {
+			--s;
+			l -= *s>>3;
+			r[*s&7] -= *s>>3;
+		} while (l >= x);
+		l += *s>>3; r[*s&7] += *s>>3; ++s;
+	}
 	i = s - p - 4; s = p + 4;
 	assert(i <= n);
 	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
@@ -198,9 +209,9 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 		if (v) ++v->c[a], ++v->l; // we should not change p->c[a] because this may cause troubles when p's child is split
 		v = p; p = p->p; // descend
 	} while (!u->is_bottom);
-	++v->c[a]; ++v->l;
 	++rope->c[a]; // $rope->c should be updated after the loop as adding a new root needs the old $rope->c counts
-	z += insert_to_leaf((uint8_t*)p, a, x - y) + 1;
+	z += insert_to_leaf((uint8_t*)p, a, x - y, v->l, v->c) + 1;
+	++v->c[a]; ++v->l; // this should be below insert_to_leaf(); otherwise insert_to_leaf() will not work
 	if (*(uint32_t*)p + 2 > rope->max_runs)
 		split_node(rope, u, v);
 	return z;
