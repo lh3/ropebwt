@@ -188,7 +188,12 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 			if (y + v->l < x) // if $v is not long enough after the split, we need to move both $p and its parent $v
 				y += v->l, z += v->c[a], ++v, p = v->p;
 		}
-		for (u = p; y + p->l < x; ++p) y += p->l, z += p->c[a]; // find the right node to descend
+		u = p;
+		if (v && x - y > v->l>>1) { // then search backwardly for the right node to descend
+			p += p->n - 1; y += v->l; z += v->c[a];
+			for (; y >= x; --p) y -= p->l, z -= p->c[a];
+			++p;
+		} else for (; y + p->l < x; ++p) y += p->l, z += p->c[a]; // then search forwardly
 		assert(p - u < u->n);
 		if (v) ++v->c[a], ++v->l; // we should not change p->c[a] because this may cause troubles when p's child is split
 		v = p; p = p->p; // descend
