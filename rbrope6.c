@@ -220,7 +220,6 @@ static void rbr_print_node(const node_t *p)
 void rbr_print(const rbrope6_t *rope) { rbr_print_node(rope->root); putchar('\n'); }
 
 typedef struct {
-	node_t *p;
 	int i, rest, k, a;
 	int64_t z;
 	node_t *pa[MAX_HEIGHT]; // parents array (pa[0] is special cased)
@@ -241,20 +240,19 @@ static void probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
 		t->pa[k] = (node_t*)p;
 		t->da[k++] = dir;
 	}
-	t->p = (node_t*)p;
-	t->z += probe_leaf(t->p, a, x - y, &t->i, &t->rest) + 1;
+	t->pa[k] = (node_t*)p;
+	t->z += probe_leaf(p, a, x - y, &t->i, &t->rest) + 1;
 	t->k = k; t->a = a;
 }
 
 static void update_rope(rbrope6_t *rope, probe1_t *u)
 {
 	int i, k = u->k;
-	for (i = 1; i < u->k; ++i) u->pa[i]->c[u->a] += 2;
-	u->p->c[u->a] += 2;
-	insert_at(u->p, u->a, u->i, u->rest);
-	if (u->p->x[0].n + 3 <= rope->max_runs) return;
-	split_leaf(rope, u->p); set_red(u->p);
-	while (k >= 3 && is_red(u->pa[k - 1])) {
+	for (i = 1; i <= u->k; ++i) u->pa[i]->c[u->a] += 2;
+	insert_at(u->pa[u->k], u->a, u->i, u->rest);
+	if (u->pa[u->k]->x[0].n + 3 <= rope->max_runs) return;
+	split_leaf(rope, u->pa[u->k]); set_red(u->pa[u->k]);
+	while (k >= 3 && is_red(u->pa[k - 1])) { // rebalance the red-black tree
 		int i = u->da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
 		node_t *r = u->pa[k - 2]->x[j].p; // $r points to the uncle
 		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
