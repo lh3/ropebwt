@@ -226,11 +226,12 @@ typedef struct {
 	int8_t da[MAX_HEIGHT];
 } probe1_t;
 
-static void probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
+static int probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
 {
 	const node_t *p;
 	int dir, k, c;
 	int64_t y;
+	uint8_t *lock;
 	for (c = 0, t->z = 0; c < a; ++c) t->z += rope->root->c[c]>>1;
 	t->pa[0] = (node_t*)&rope->root; // this is a trick learnt from libavl
 	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
@@ -240,9 +241,13 @@ static void probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
 		t->pa[k] = (node_t*)p;
 		t->da[k++] = dir;
 	}
+	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
+	//if (!__sync_bool_compare_and_swap(lock, 0, 1)) return -1;
 	t->pa[k] = (node_t*)p;
 	t->z += probe_leaf(p, a, x - y, &t->i, &t->rest) + 1;
+	assert(t->i < rope->max_runs);
 	t->k = k; t->a = a;
+	return 0;
 }
 
 static void update_rope(rbrope6_t *rope, probe1_t *u)
@@ -250,7 +255,8 @@ static void update_rope(rbrope6_t *rope, probe1_t *u)
 	int i, k = u->k;
 	for (i = 1; i <= u->k; ++i) u->pa[i]->c[u->a] += 2;
 	insert_at(u->pa[u->k], u->a, u->i, u->rest);
-	if (u->pa[u->k]->x[0].n + 3 <= rope->max_runs) return;
+	//u->pa[u->k]->x[1].s[rope->max_runs - 1] = 0;
+	if (u->pa[u->k]->x[0].n + 2 <= rope->max_runs) return;
 	split_leaf(rope, u->pa[u->k]); set_red(u->pa[u->k]);
 	while (k >= 3 && is_red(u->pa[k - 1])) { // rebalance the red-black tree
 		int i = u->da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
