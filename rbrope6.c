@@ -242,7 +242,7 @@ static void probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
 		t->da[k++] = dir;
 	}
 	t->p = (node_t*)p;
-	t->z += probe_leaf(t->p, a, x - y, &t->i, &t->rest);
+	t->z += probe_leaf(t->p, a, x - y, &t->i, &t->rest) + 1;
 	t->k = k; t->a = a;
 }
 
