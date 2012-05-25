@@ -130,26 +130,36 @@ static inline void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	p->x[0].p = q[0]; p->x[1].p = q[1];
 }
 
-static int insert_to_leaf(rbrnode_t *p, int a, int x)
+static int probe_ins(const rbrnode_t *p, int a, int x, int *_i, int *rest)
+{
+	int r[6], i, l = 0;
+	const uint8_t *s = p->x[1].s;
+	if (p->x[0].n == 0) {
+		*_i = -1; *rest = 0;
+		return 0;
+	}
+	for (i = 0; i < 6; ++i) r[i] = 0;
+	do {
+		l += *s>>3;
+		r[*s&7] += *s>>3;
+		++s;
+	} while (l < x);
+	r[*--s&7] -= l - x; // $i now points to the left-most run where $a can be inserted
+	*_i = s - p->x[1].s;
+	*rest = l - x;
+	return r[a];
+}
+
+static void insert_at(rbrnode_t *p, int a, int i, int rest)
 {
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
 
-	int r[6], i, l;
 	uint8_t *s = p->x[1].s;
-	if (p->x[0].n == 0) { // if $s is empty, that is easy
+	if (i < 0) { // p is empty
 		s[p->x[0].n++] = 1<<3 | a;
-		return 0;
+		return;
 	}
-	memset(r, 0, 24);
-	i = l = 0;
-	do { // this loop is likely to be the bottleneck
-		register int c = s[i++];
-		l += c>>3;
-		r[c&7] += c>>3;
-	} while (l < x);
-	assert(i <= p->x[0].n);
-	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
-	if (l == x && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
+	if (rest == 0 && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
 	if ((s[i]&7) == a) { // insert to a long $a run
 		if (s[i]>>3 == MAX_RUNLEN) { // the run is full
 			for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
@@ -158,10 +168,10 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 				_insert_after(p->x[0].n, s, i, 1<<3|a);
 			} else s[i] += 1<<3;
 		} else s[i] += 1<<3;
-	} else if (l == x) { // insert to the end of run; in this case, neither this and the next run is $a
+	} else if (rest == 0) { // insert to the end of run; in this case, neither this and the next run is $a
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
 	} else if (i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
-		int rest = l - x, c = s[i]&7;
+		int c = s[i]&7;
 		s[i] -= rest<<3;
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
 		for (i += 2; i != p->x[0].n && (s[i]&7) == c; ++i); // find the end of the long run
@@ -173,12 +183,19 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		} else s[i] += rest<<3;
 	} else { // insert to a short run
 		memmove(s + i + 3, s + i + 1, p->x[0].n - i - 1);
-		s[i]  -= (l-x)<<3;
+		s[i]  -= rest<<3;
 		s[i+1] = 1<<3 | a;
-		s[i+2] = (l-x)<<3 | (s[i]&7);
+		s[i+2] = rest<<3 | (s[i]&7);
 		p->x[0].n += 2;
 	}
-	return r[a];
+}
+
+static int insert_to_leaf(rbrnode_t *p, int a, int x)
+{
+	int rest, i, r;
+	r = probe_ins(p, a, x, &i, &rest);
+	insert_at(p, a, i, rest);
+	return r;
 }
 
 static inline void update_count(rbrnode_t *p) // recompute counts from the two children; p MUST BE internal
