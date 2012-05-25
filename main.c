@@ -3,7 +3,6 @@
 #include <string.h>
 #include <unistd.h>
 #include "bprope6.h"
-#include "rbrope6.h"
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
@@ -39,12 +38,12 @@ void seq_revcomp6(int l, unsigned char *s)
 
 int main(int argc, char *argv[])
 {
-	rbrope6_t *rbr = 0;
 	bprope6_t *bpr = 0;
 	gzFile fp;
 	kseq_t *ks;
 	int c, i, j, for_only = 0, print_rope = 0, max_runs = 512, max_nodes = 64;
 	const uint8_t *s;
+	bpriter_t *iter;
 
 	while ((c = getopt(argc, argv, "Tfr:n:")) >= 0)
 		if (c == 'f') for_only = 1;
@@ -56,46 +55,29 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (max_nodes <= 2) rbr = rbr_init(max_runs);
-	else bpr = bpr_init(max_nodes, max_runs);
+	bpr = bpr_init(max_nodes, max_runs);
 	fp = gzopen(argv[optind], "rb");
 	ks = kseq_init(fp);
 	while (kseq_read(ks) >= 0) {
 		uint8_t *s = (uint8_t*)ks->seq.s;
 		seq_char2nt6(ks->seq.l, s);
-		if (rbr) rbr_insert_string(rbr, ks->seq.l, s);
-		if (bpr) bpr_insert_string(bpr, ks->seq.l, s);
+		bpr_insert_string(bpr, ks->seq.l, s);
 		if (!for_only) {
 			seq_revcomp6(ks->seq.l, s);
-			if (rbr) rbr_insert_string(rbr, ks->seq.l, s);
-			if (bpr) bpr_insert_string(bpr, ks->seq.l, s);
+			bpr_insert_string(bpr, ks->seq.l, s);
 		}
 	}
 	kseq_destroy(ks);
 	gzclose(fp);
 
-	if (rbr) {
-		rbriter_t *iter;
-		iter = rbr_iter_init(rbr);
-		while ((s = rbr_iter_next(iter, &c)) != 0)
-			for (i = 0; i < c; ++i)
-				for (j = 0; j < s[i]>>3; ++j)
-					putchar("$ACGTN"[s[i]&7]);
-		putchar('\n');
-		if (print_rope) rbr_print(rbr);
-		free(iter);
-		rbr_destroy(rbr);
-	}
-	if (bpr) {
-		bpriter_t *iter = bpr_iter_init(bpr);
-		while ((s = bpr_iter_next(iter, &c)) != 0)
-			for (i = 0; i < c; ++i)
-				for (j = 0; j < s[i]>>3; ++j)
-					putchar("$ACGTN"[s[i]&7]);
-		putchar('\n');
-		if (print_rope) bpr_print(bpr);
-		free(iter);
-		bpr_destroy(bpr);
-	}
+	iter = bpr_iter_init(bpr);
+	while ((s = bpr_iter_next(iter, &c)) != 0)
+		for (i = 0; i < c; ++i)
+			for (j = 0; j < s[i]>>3; ++j)
+				putchar("$ACGTN"[s[i]&7]);
+	putchar('\n');
+	if (print_rope) bpr_print(bpr);
+	free(iter);
+	bpr_destroy(bpr);
 	return 0;
 }
