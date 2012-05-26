@@ -107,6 +107,47 @@ void rbr_destroy(rbrope6_t *rope)
 	free(rope);
 }
 
+static inline void update_count(node_t *p) // recompute counts from the two children; p MUST BE internal
+{
+	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1 | (p->c[0]&1);
+	p->c[1] = ((p->x[0].p->c[1]>>1) + (p->x[1].p->c[1]>>1))<<1;
+	p->c[2] = ((p->x[0].p->c[2]>>1) + (p->x[1].p->c[2]>>1))<<1;
+	p->c[3] = ((p->x[0].p->c[3]>>1) + (p->x[1].p->c[3]>>1))<<1;
+	p->c[4] = ((p->x[0].p->c[4]>>1) + (p->x[1].p->c[4]>>1))<<1;
+	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
+}
+
+static inline void insert_fix(int k, node_t **pa, const int8_t *da)
+{
+	while (k >= 3 && is_red(pa[k - 1])) { // rebalance the red-black tree
+		int i = da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
+		node_t *r = pa[k - 2]->x[j].p; // $r points to the uncle
+		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
+			set_black(r);
+			set_black(pa[k - 1]);
+			set_red(pa[k - 2]); // grandparent to red
+			k -= 2;
+		} else {
+			node_t *t;
+			if (da[k - 1] != i) { // if the child and the parent are on different sides: 
+				t = pa[k - 1]; // $t: parent node
+				r = t->x[j].p; // $r: sibling node
+				t->x[j].p = r->x[i].p; update_count(t); // rotate to the same side
+				r->x[i].p = t; update_count(r);
+				pa[k - 2]->x[i].p = r;
+			} else r = pa[k - 1];
+			t = pa[k - 2];
+			set_red(t);
+			set_black(r);
+			t->x[i].p = r->x[j].p; update_count(t);
+			r->x[j].p = t; update_count(r);
+			pa[k - 3]->x[da[k - 3]].p = r; // when k==3, this line will automatically change the root
+			break;
+		}
+	}
+	set_black(*(node_t**)pa[0]); // *(node_t**)pa[0] is the root; set black at the root
+}
+
 static inline void split_leaf(rbrope6_t *rope, node_t *p)
 {
 	node_t *q[2];
@@ -190,16 +231,6 @@ static void insert_at(node_t *p, int a, int i, int rest)
 	}
 }
 
-static inline void update_count(node_t *p) // recompute counts from the two children; p MUST BE internal
-{
-	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1 | (p->c[0]&1);
-	p->c[1] = ((p->x[0].p->c[1]>>1) + (p->x[1].p->c[1]>>1))<<1;
-	p->c[2] = ((p->x[0].p->c[2]>>1) + (p->x[1].p->c[2]>>1))<<1;
-	p->c[3] = ((p->x[0].p->c[3]>>1) + (p->x[1].p->c[3]>>1))<<1;
-	p->c[4] = ((p->x[0].p->c[4]>>1) + (p->x[1].p->c[4]>>1))<<1;
-	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
-}
-
 static void rbr_print_node(const node_t *p)
 {
 	if (is_leaf(p)) {
@@ -255,33 +286,7 @@ static void update_rope(rbrope6_t *rope, probe1_t *u)
 	insert_at(u->pa[k], u->a, u->i, u->rest);
 	if (u->pa[k]->x[0].n + 2 <= rope->max_runs) return;
 	split_leaf(rope, u->pa[k]); set_red(u->pa[k]);
-	while (k >= 3 && is_red(u->pa[k - 1])) { // rebalance the red-black tree
-		int i = u->da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
-		node_t *r = u->pa[k - 2]->x[j].p; // $r points to the uncle
-		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
-			set_black(r);
-			set_black(u->pa[k - 1]);
-			set_red(u->pa[k - 2]); // grandparent to red
-			k -= 2;
-		} else {
-			node_t *t;
-			if (u->da[k - 1] != i) { // if the child and the parent are on different sides: 
-				t = u->pa[k - 1]; // $t: parent node
-				r = t->x[j].p; // $r: sibling node
-				t->x[j].p = r->x[i].p; update_count(t); // rotate to the same side
-				r->x[i].p = t; update_count(r);
-				u->pa[k - 2]->x[i].p = r;
-			} else r = u->pa[k - 1];
-			t = u->pa[k - 2];
-			set_red(t);
-			set_black(r);
-			t->x[i].p = r->x[j].p; update_count(t);
-			r->x[j].p = t; update_count(r);
-			u->pa[k - 3]->x[u->da[k - 3]].p = r; // when k==3, this line will automatically change the root
-			break;
-		}
-	}
-	set_black(rope->root); // $root is always black
+	insert_fix(u->k, u->pa, u->da);
 }
 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
