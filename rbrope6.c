@@ -242,7 +242,6 @@ static int probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
 		t->da[k++] = dir;
 	}
 	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
-	if (!__sync_bool_compare_and_swap(lock, 0, 1)) return -1;
 	t->pa[k] = (node_t*)p;
 	t->z += probe_leaf(p, a, x - y, &t->i, &t->rest) + 1;
 	t->k = k; t->a = a;
@@ -254,8 +253,7 @@ static void update_rope(rbrope6_t *rope, probe1_t *u)
 	int i, k = u->k;
 	for (i = 1; i <= k; ++i) u->pa[i]->c[u->a] += 2;
 	insert_at(u->pa[k], u->a, u->i, u->rest);
-	u->pa[k]->x[1].s[rope->max_runs - 1] = 0;
-	if (u->pa[k]->x[0].n + 3 <= rope->max_runs) return;
+	if (u->pa[k]->x[0].n + 2 <= rope->max_runs) return;
 	split_leaf(rope, u->pa[k]); set_red(u->pa[k]);
 	while (k >= 3 && is_red(u->pa[k - 1])) { // rebalance the red-black tree
 		int i = u->da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
