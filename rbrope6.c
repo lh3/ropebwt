@@ -173,19 +173,32 @@ static inline void split_leaf(rbrope6_t *rope, node_t *p)
 
 static int probe_leaf(const node_t *p, int a, int x, int *_i, int *rest)
 {
-	int r[6], i, l = 0;
+	int r[6], i, l = 0, len;
 	const uint8_t *s = p->x[1].s;
 	if (p->x[0].n == 0) {
 		*_i = -1; *rest = 0;
 		return 0;
 	}
-	for (i = 0; i < 6; ++i) r[i] = 0;
-	do {
-		l += *s>>3;
-		r[*s&7] += *s>>3;
-		++s;
-	} while (l < x);
-	r[*--s&7] -= l - x; // $i now points to the left-most run where $a can be inserted
+	len = rbr_strlen(p);
+	if (x < len>>1) { // forward search
+		for (i = 0; i < 6; ++i) r[i] = 0;
+		do {
+			l += *s>>3;
+			r[*s&7] += *s>>3;
+			++s;
+		} while (l < x);
+	} else { // backward search
+		__builtin_prefetch(p->x[1].p, 0);
+		for (i = 0; i < 6; ++i) r[i] = p->c[i]>>1;
+		l = len, s += p->x[0].n;
+		do {
+			--s;
+			l -= *s>>3;
+			r[*s&7] -= *s>>3;
+		} while (l >= x);
+		l += *s>>3; r[*s&7] += *s>>3; ++s;
+	}
+	r[*--s&7] -= l - x; // $s now points to the left-most run where $a can be inserted
 	*_i = s - p->x[1].s;
 	*rest = l - x;
 	return r[a];
