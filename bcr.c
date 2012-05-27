@@ -19,7 +19,7 @@
 
 typedef struct {
 	int max;
-	uint64_t **a, cnt[6];
+	uint64_t **a;
 } longdna_t;
 
 longdna_t *ld_init(void)
@@ -46,7 +46,6 @@ inline void ld_set(longdna_t *h, int64_t x, int c)
 	}
 	if (h->a[k] == 0) h->a[k] = calloc(1<<LD_SHIFT>>5, 8);
 	h->a[k][l>>5] |= (c&3)<<(l&31); // NB: we cannot set the same position multiple times
-	++h->cnt[c];
 }
 
 inline int ld_get(longdna_t *h, int64_t x)
@@ -143,7 +142,7 @@ static void *worker(void *data)
 		if (w->i > w->b->len[i] - 1) continue; // FIXME: check if this works for variable-length strings
 		rld_rank1a(w->b->e, p->u, (uint64_t*)ok);
 		p->u = w->b->e->cnt[c] + ok[c] - 1;
-		p->v = p->v>>3<<3 | ld_get(w->b->seq[w->i], p->v>>3);
+		p->v = p->v>>3<<3 | (w->i >= 0? ld_get(w->b->seq[w->i], p->v>>3) : 0);
 	}
 	return data;
 }
@@ -152,7 +151,7 @@ void bcr_build1(bcr_t *b, int which)
 {
 	rld_t *e0;
 	rlditr_t itr0;
-	int64_t i, last, c_all[6], c_part[6];
+	int64_t i, last;
 	int j;
 	pthread_t *tid;
 	pthread_attr_t attr;
@@ -168,16 +167,13 @@ void bcr_build1(bcr_t *b, int which)
 	for (j = 0; j < b->n_threads; ++j) pthread_create(&tid[j], &attr, worker, w + j);
 	for (j = 0; j < b->n_threads; ++j) pthread_join(tid[j], 0);
 	free(w); free(tid);
-	// prepare for the next iteration
-	memcpy(c_all, b->seq[which]->cnt, 48);
-	for (i = 1; i < 6; ++i) c_all[i] += c_all[i - 1]; // get the accumulative counts
-	ld_destroy(b->seq[which]);
+	if (which >= 0) ld_destroy(b->seq[which]);
+
+	// insert to the current BWT; similar to fm_merge_from_SA() in fermi
 	e0 = b->e;
 	b->e = rld_init(6, 3);
 	rld_itr_init(e0, &itr0, 0);
 	rld_itr_init(b->e, &b->itr, 0);
-	//
-	memset(c_part, 0, 48);
 	ks_introsort(bcr, b->n_seqs, b->a);
 	for (i = last = 0; i < b->n_seqs; ++i) {
 		pair64_t *p = &b->a[i];
@@ -186,13 +182,19 @@ void bcr_build1(bcr_t *b, int which)
 			last = p->u;
 		}
 		rld_enc(b->e, &b->itr, 1, p->v&7);
-		p->u += c_all[p->v&7] + c_part[p->v&7];
-		++c_part[p->v&7];
+		p->u += i;
 	}
 	if (last != e0->mcnt[0] - 1)
 		rld_dec_enc(b->e, &b->itr, e0, &itr0, e0->mcnt[0] - 1 - last);
 	rld_destroy(e0);
 	rld_enc_finish(b->e, &b->itr);
+}
+
+void bcr_build(bcr_t *b)
+{
+	int j;
+	for (j = 0; j < b->max_len - 1; ++j) bcr_build1(b, j);
+	bcr_build1(b, -1);
 }
 
 /*********************
@@ -263,6 +265,8 @@ int main(int argc, char *argv[])
 	}
 	kseq_destroy(ks);
 	gzclose(fp);
+
+	bcr_build(bcr);
 	rld_dump(bcr->e, "-");
 	bcr_destroy(bcr);
 	return 0;
