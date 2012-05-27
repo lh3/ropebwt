@@ -87,6 +87,8 @@ bcr_t *bcr_init(int n_threads)
 
 void bcr_destroy(bcr_t *b)
 {
+	free(b->len); free(b->a); free(b->seq);
+	free(b);
 }
 
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
@@ -107,7 +109,7 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	c = (seq[len - 1] & 3) + 1;
 	rld_enc(b->e, &b->itr, 1, c);
 	for (i = 0; i < len - 2; ++i)
-		ld_set(b->seq[i], b->n_seqs, seq[i]&3);
+		ld_set(b->seq[i], b->n_seqs, seq[len - 2 - i]&3);
 	++b->n_seqs;
 }
 
@@ -119,12 +121,8 @@ void bcr_prepare(bcr_t *b)
 	rld_enc_finish(b->e, &b->itr);
 	b->a = malloc(b->n_seqs * 16);
 	assert(b->a);
-	for (k = 0; k < b->n_seqs; ++k) {
-		pair64_t *p = &b->a[k];
-		p->u = k;
-		p->v = k<<3 | ld_get(b->seq[0], k);
-	}
-	ld_destroy(b->seq[0]);
+	for (k = 0; k < b->n_seqs; ++k)
+		b->a[k].u = k, b->a[k].v = k<<3;
 }
 
 typedef struct {
@@ -139,10 +137,10 @@ static void *worker(void *data)
 	for (i = w->start; i < w->b->n_seqs; i += w->step) {
 		pair64_t *p = &w->b->a[i];
 		int c = p->v&7;
-		if (w->i > w->b->len[i] - 1) continue; // FIXME: check if this works for variable-length strings
+		if (w->i < w->b->max_len - 1 && w->i > w->b->len[i] - 1) continue; // FIXME: check if this works for variable-length strings
 		rld_rank1a(w->b->e, p->u, (uint64_t*)ok);
 		p->u = w->b->e->cnt[c] + ok[c] - 1;
-		p->v = p->v>>3<<3 | (w->i >= 0? ld_get(w->b->seq[w->i], p->v>>3) : 0);
+		p->v = p->v>>3<<3 | (w->i < w->b->max_len - 1? ld_get(w->b->seq[w->i], p->v>>3) : 0);
 	}
 	return data;
 }
@@ -167,7 +165,7 @@ void bcr_build1(bcr_t *b, int which)
 	for (j = 0; j < b->n_threads; ++j) pthread_create(&tid[j], &attr, worker, w + j);
 	for (j = 0; j < b->n_threads; ++j) pthread_join(tid[j], 0);
 	free(w); free(tid);
-	if (which >= 0) ld_destroy(b->seq[which]);
+	if (which < b->max_len - 1) ld_destroy(b->seq[which]);
 
 	// insert to the current BWT; similar to fm_merge_from_SA() in fermi
 	e0 = b->e;
