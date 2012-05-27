@@ -191,8 +191,7 @@ void bcr_build1(bcr_t *b, int which)
 void bcr_build(bcr_t *b)
 {
 	int j;
-	for (j = 0; j < b->max_len - 1; ++j) bcr_build1(b, j);
-	bcr_build1(b, -1);
+	for (j = 0; j < b->max_len; ++j) bcr_build1(b, j);
 }
 
 /*********************
@@ -218,8 +217,10 @@ unsigned char seq_nt6_table[128] = {
 void seq_char2nt6(int l, unsigned char *s)
 {
 	int i;
-	for (i = 0; i < l; ++i)
+	for (i = 0; i < l; ++i) {
 		s[i] = s[i] < 128? seq_nt6_table[s[i]] : 5;
+		if (s[i] >= 5) s[i] = lrand48()&3;
+	}
 }
 
 void seq_revcomp6(int l, unsigned char *s)
