@@ -93,7 +93,7 @@ void bcr_destroy(bcr_t *b)
 
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
 {
-	int i, c;
+	int i;
 	assert(len < 256 && len > 1);
 	if (len > b->max_len) { // find a longer read
 		b->seq = realloc(b->seq, (len - 1) * sizeof(void*));
@@ -106,10 +106,9 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 		b->len = realloc(b->len, 1);
 	}
 	b->len[b->n_seqs] = len;
-	c = (seq[len - 1] & 3) + 1;
-	rld_enc(b->e, &b->itr, 1, c);
+	rld_enc(b->e, &b->itr, 1, seq[len - 1]);
 	for (i = 0; i < len - 2; ++i)
-		ld_set(b->seq[i], b->n_seqs, seq[len - 2 - i]&3);
+		ld_set(b->seq[i], b->n_seqs, seq[len - 2 - i] - 1);
 	++b->n_seqs;
 }
 
@@ -136,11 +135,9 @@ static void *worker(void *data)
 	int64_t i, ok[6];
 	for (i = w->start; i < w->b->n_seqs; i += w->step) {
 		pair64_t *p = &w->b->a[i];
-		int c = p->v&7;
 		if (w->i < w->b->max_len - 1 && w->i > w->b->len[i] - 1) continue; // FIXME: check if this works for variable-length strings
 		rld_rank1a(w->b->e, p->u, (uint64_t*)ok);
-		p->u = w->b->e->cnt[c] + ok[c] - 1;
-		p->v = p->v>>3<<3 | (w->i < w->b->max_len - 1? ld_get(w->b->seq[w->i], p->v>>3) : 0);
+		p->u = w->b->e->cnt[p->v&7] + ok[p->v&7] - 1;
 	}
 	return data;
 }
@@ -155,6 +152,13 @@ void bcr_build1(bcr_t *b, int which)
 	pthread_attr_t attr;
 	worker_t *w;
 
+	// set b->a[].v
+	if (which < b->max_len - 1) {
+		for (i = 0; i < b->n_seqs; ++i)
+			b->a[i].v = (b->a[i].v & ~7ULL) | (ld_get(b->seq[which], b->a[i].v>>3) + 1);
+		ld_destroy(b->seq[which]);
+	} else for (i = 0; i < b->n_seqs; ++i) b->a[i].v &= ~7ULL;
+
 	// dispatch workers
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
@@ -165,7 +169,6 @@ void bcr_build1(bcr_t *b, int which)
 	for (j = 0; j < b->n_threads; ++j) pthread_create(&tid[j], &attr, worker, w + j);
 	for (j = 0; j < b->n_threads; ++j) pthread_join(tid[j], 0);
 	free(w); free(tid);
-	if (which < b->max_len - 1) ld_destroy(b->seq[which]);
 
 	// insert to the current BWT; similar to fm_merge_from_SA() in fermi
 	e0 = b->e;
@@ -219,7 +222,7 @@ void seq_char2nt6(int l, unsigned char *s)
 	int i;
 	for (i = 0; i < l; ++i) {
 		s[i] = s[i] < 128? seq_nt6_table[s[i]] : 5;
-		if (s[i] >= 5) s[i] = lrand48()&3;
+		if (s[i] >= 5) s[i] = (lrand48()&3) + 1;
 	}
 }
 
