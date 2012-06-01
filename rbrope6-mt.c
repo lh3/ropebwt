@@ -380,10 +380,22 @@ void rbm_update_multi(rbmope6_t *rope)
 	}
 	n = rope->n_seqs;
 	for (l = 1; n; ++l) {
+		int64_t c[6];
+		if (l > 1) ks_introsort(rbm, n, rope->state);
 		for (i = 0; i < n; ++i) probe(rope, &rope->state[i]);
-		// modify here
-		ks_introsort(rbm, n, rope->state);
-		for (i = 0; i < n; ++i) rope->state[i].z += i; // get the correct insertion coordinate
+		modify_multi(rope, n, rope->state);
+		memset(c, 0, 48);
+		for (i = 0; i < n; ++i) {
+			probe1_t *u = &rope->state[i];
+			u->z += c[u->a];
+			++c[u->a];
+		}
+		memmove(c + 1, c, 40);
+		for (i = 1, c[0] = 0; i < 6; ++i) c[i] += c[i - 1]; // c[] now keeps the accumulative counts
+		for (i = 0; i < n; ++i) {
+			probe1_t *u = &rope->state[i];
+			u->z += c[u->a];
+		}
 		for (i = m = 0; i < n; ++i) // exclude finished sequences
 			if (rope->state[i].a) {
 				if (m == i) ++m;
