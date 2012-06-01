@@ -173,7 +173,7 @@ static inline node_t *insert_fix(node_t *q)
 	return 0;
 }
 
-static inline void fix(rbmope6_t *rope, node_t *p, int is_free)
+static inline void fix(rbmope6_t *rope, node_t *p, uint8_t *s0)
 {
 	while (p->x[0].n + 2 > rope->max_runs) {
 		int i, n1 = p->x[0].n >> 1;
@@ -200,11 +200,10 @@ static inline void fix(rbmope6_t *rope, node_t *p, int is_free)
 		if ((t = insert_fix(p)) != 0) rope->root = t;
 		p = q[0];
 	}
-	if (is_free) {
-		uint8_t *s = p->x[1].s;
-		p->x[1].s = mp_alloc(rope->str);
-		memcpy(p->x[1].s, s, p->x[0].n);
-		free(s);
+	if (s0) {
+		memcpy(s0, p->x[1].s, p->x[0].n);
+		free(p->x[1].s);
+		p->x[1].s = s0;
 	}
 }
 
