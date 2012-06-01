@@ -189,12 +189,12 @@ static inline void split_leaf(rbmope6_t *rope, node_t *p)
 	p->x[1].p = q[1]; q[1]->parent = p;
 }
 
-static int probe_leaf(const node_t *p, int a, int x, int *_i, int *rest)
+static int probe_leaf(const node_t *p, int a, int x, uint64_t *pos)
 {
 	int r[6], i, l = 0, len;
 	const uint8_t *s = p->x[1].s;
 	if (p->x[0].n == 0) {
-		*_i = -1; *rest = 0;
+		*pos = (uint64_t)-1;
 		return 0;
 	}
 	len = rbm_strlen(p);
@@ -217,20 +217,21 @@ static int probe_leaf(const node_t *p, int a, int x, int *_i, int *rest)
 		l += *s>>3; r[*s&7] += *s>>3; ++s;
 	}
 	r[*--s&7] -= l - x; // $s now points to the left-most run where $a can be inserted
-	*_i = s - p->x[1].s;
-	*rest = l - x;
+	*pos = (uint64_t)(s - p->x[1].s)<<32 | ((*s>>3) - (l - x));
 	return r[a];
 }
 
-static void insert_at(node_t *p, int a, int i, int rest)
+static void insert_at(node_t *p, int a, uint64_t pos)
 {
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
 
 	uint8_t *s = p->x[1].s;
-	if (i < 0) { // p is empty
+	int i, rest;
+	if (pos == (uint64_t)-1) { // p is empty
 		s[p->x[0].n++] = 1<<3 | a;
 		return;
 	}
+	i = pos>>32; rest = (s[i]>>3) - (pos<<32>>32);
 	if (rest == 0 && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
 	if ((s[i]&7) == a) { // insert to a long $a run
 		if (s[i]>>3 == MAX_RUNLEN) { // the run is full
@@ -283,8 +284,8 @@ void rbm_print(const rbmope6_t *rope) { rbm_print_node(rope->root); putchar('\n'
 
 typedef struct {
 	node_t *p;
+	uint64_t pos; // higher 32 bits: position; lower: insert after symbols
 	uint64_t z:61, a:3;
-	int i, rest;
 } probe1_t;
 
 static int probe_rope(const rbmope6_t *rope, int a, int64_t x, probe1_t *t)
@@ -301,7 +302,7 @@ static int probe_rope(const rbmope6_t *rope, int a, int64_t x, probe1_t *t)
 	}
 	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
 	t->p = (node_t*)p;
-	t->z += probe_leaf(p, a, x - y, &t->i, &t->rest) + 1;
+	t->z += probe_leaf(p, a, x - y, &t->pos) + 1;
 	t->a = a;
 	return 0;
 }
@@ -310,10 +311,26 @@ static void update_rope(rbmope6_t *rope, probe1_t *u)
 {
 	node_t *p;
 	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
-	insert_at(u->p, u->a, u->i, u->rest);
+	insert_at(u->p, u->a, u->pos);
 	if (u->p->x[0].n + 2 <= rope->max_runs) return;
 	split_leaf(rope, u->p); set_red(u->p);
 	if ((p = insert_fix(u->p)) != 0) rope->root = p;
+}
+
+static void update_rope_multi(rbmope6_t *rope, int n, probe1_t *u) // all u->p MUST BE identical and u->i MUST BE sorted
+{
+	int i, j, c[6];
+	node_t *p;
+	uint8_t *s;
+	memset(c, 0, 6 * sizeof(int));
+	for (i = 0; i < n; ++i) c[u->a] += 2;
+	for (p = u->p; p; p = p->parent)
+		for (i = 0; i < 6; ++i) p->c[i] += c[i];
+	p = u->p;
+	s = malloc(n + rope->max_runs);
+	for (i = j = 0; i < p->x[0].n; ++i) {
+	}
+	free(s);
 }
 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
