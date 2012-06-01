@@ -176,7 +176,8 @@ static inline void split_leaf(rbmope6_t *rope, node_t *p)
 	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i]&(~1ULL);
 	// finalize p
 	set_internal(p);
-	p->x[0].p = q[0]; p->x[1].p = q[1];
+	p->x[0].p = q[0]; q[0]->parent = p;
+	p->x[1].p = q[1]; q[1]->parent = p;
 }
 
 static int probe_leaf(const node_t *p, int a, int x, int *_i, int *rest)
@@ -272,43 +273,38 @@ static void rbm_print_node(const node_t *p)
 void rbm_print(const rbmope6_t *rope) { rbm_print_node(rope->root); putchar('\n'); }
 
 typedef struct {
-	int i, rest, k, a;
-	int64_t z;
-	node_t *pa[MAX_HEIGHT]; // parents array (pa[0] is special cased)
-	int8_t da[MAX_HEIGHT];
+	node_t *p;
+	uint64_t z:61, a:3;
+	int i, rest;
 } probe1_t;
 
 static int probe_rope(const rbmope6_t *rope, int a, int64_t x, probe1_t *t)
 {
 	const node_t *p;
-	int dir, k, c;
+	int dir, c;
 	int64_t y;
 	uint8_t *lock;
 	for (c = 0, t->z = 0; c < a; ++c) t->z += rope->root->c[c]>>1;
-	t->pa[0] = (node_t*)&rope->root; t->da[0] = 0; // this is a trick learnt from libavl
-	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
+	for (p = rope->root, y = 0; !is_leaf(p); p = p->x[dir].p) {
 		int l = rbm_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, t->z += p->x[0].p->c[a]>>1;
 		else dir = 0;
-		t->pa[k] = (node_t*)p;
-		t->da[k++] = dir;
 	}
 	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
-	t->pa[k] = (node_t*)p;
+	t->p = (node_t*)p;
 	t->z += probe_leaf(p, a, x - y, &t->i, &t->rest) + 1;
-	t->k = k; t->a = a;
+	t->a = a;
 	return 0;
 }
 
 static void update_rope(rbmope6_t *rope, probe1_t *u)
 {
-	int i, k = u->k;
 	node_t *p;
-	for (i = 1; i <= k; ++i) u->pa[i]->c[u->a] += 2;
-	insert_at(u->pa[k], u->a, u->i, u->rest);
-	if (u->pa[k]->x[0].n + 2 <= rope->max_runs) return;
-	split_leaf(rope, u->pa[k]); set_red(u->pa[k]);
-	if ((p = insert_fix(u->pa[u->k])) != 0) rope->root = p;
+	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
+	insert_at(u->p, u->a, u->i, u->rest);
+	if (u->p->x[0].n + 2 <= rope->max_runs) return;
+	split_leaf(rope, u->p); set_red(u->p);
+	if ((p = insert_fix(u->p)) != 0) rope->root = p;
 }
 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
