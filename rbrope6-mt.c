@@ -290,26 +290,25 @@ static void rbm_print_node(const node_t *p)
 
 void rbm_print(const rbmope6_t *rope) { rbm_print_node(rope->root); putchar('\n'); }
 
-static int probe_rope(const rbmope6_t *rope, int a, int64_t x, probe1_t *t)
+static int probe(const rbmope6_t *rope, probe1_t *t)
 {
 	const node_t *p;
 	int dir, c;
-	int64_t y;
+	int64_t x = t->z, y;
 	uint8_t *lock;
-	for (c = 0, t->z = 0; c < a; ++c) t->z += rope->root->c[c]>>1;
+	for (c = 0, t->z = 0; c < t->a; ++c) t->z += rope->root->c[c]>>1;
 	for (p = rope->root, y = 0; !is_leaf(p); p = p->x[dir].p) {
 		int l = rbm_strlen(p->x[0].p);
-		if (x > l + y) dir = 1, y += l, t->z += p->x[0].p->c[a]>>1;
+		if (x > l + y) dir = 1, y += l, t->z += p->x[0].p->c[t->a]>>1;
 		else dir = 0;
 	}
 	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
 	t->p = (node_t*)p;
-	t->z += probe_leaf(p, a, x - y, &t->pos) + 1;
-	t->a = a;
+	t->z += probe_leaf(p, t->a, x - y, &t->pos) + 1;
 	return 0;
 }
 
-static void update_rope(rbmope6_t *rope, probe1_t *u)
+static void modify(rbmope6_t *rope, const probe1_t *u)
 {
 	node_t *p;
 	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
@@ -338,13 +337,11 @@ static void update_rope_multi(rbmope6_t *rope, int n, probe1_t *u) // all u->p M
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
 uint64_t rbm_insert_symbol(rbmope6_t *rope, int a, uint64_t x)
 {
-	int64_t z;
-	probe1_t *u;
-	u = alloca(sizeof(probe1_t));
-	probe_rope(rope, a, x, u);
-	z = u->z;
-	update_rope(rope, u);
-	return z;
+	probe1_t u;
+	u.a = a; u.z = x;
+	probe(rope, &u);
+	modify(rope, &u);
+	return u.z;
 }
 
 void rbm_update(rbmope6_t *rope)
@@ -365,8 +362,13 @@ void rbm_update(rbmope6_t *rope)
 void rbm_update_multi(rbmope6_t *rope)
 {
 	int i, l, n;
-	for (i = 0; i < rope->n_seqs; ++i) rope->state[i].z = rope->root->c[0]>>1;
+	for (i = 0; i < rope->n_seqs; ++i) {
+		rope->state[i].z = rope->root->c[0]>>1;
+		rope->state[i].a = rope->buf[i][0];
+	}
+	n = rope->n_seqs;
 	for (l = 0;; ++l) {
+		for (i = 0; i < n; ++i);
 	}
 }
 
