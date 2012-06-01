@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (n_threads > 1) rbm = rbm_init(max_runs);
+	if (n_threads > 1) rbm = rbm_init(n_threads, 0x10000, max_runs);
 	else if (max_nodes <= 2) rbr = rbr_init(max_runs);
 	else bpr = bpr_init(max_nodes, max_runs);
 	fp = gzopen(argv[optind], "rb");

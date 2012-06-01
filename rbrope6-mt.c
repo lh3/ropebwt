@@ -55,7 +55,7 @@ static inline void *mp_alloc(mempool_t *mp)
 #define MAX_RUNLEN 31
 
 typedef struct rbrnode_s {
-	union { // IMPORTANT: always make sure x[0].p is the first member; otherwise rb-tree rebalancing will fail
+	union {
 		struct rbrnode_s *p; // pointer to children; internal node only
 		uint8_t *s; // string; leaf.x[1] only
 		int n; // number of runs; leaf.x[0] only
@@ -75,7 +75,7 @@ typedef struct rbrnode_s {
 #define rbm_strlen(_p) (((_p)->c[0]>>1) + ((_p)->c[1]>>1) + ((_p)->c[2]>>1) + ((_p)->c[3]>>1) + ((_p)->c[4]>>1) + ((_p)->c[5]>>1))
 
 struct rbmope6_s {
-	int max_runs;
+	int max_runs, n_threads, max_seqs;
 	mempool_t *node, *str;
 	node_t *root;
 };
@@ -89,11 +89,13 @@ static node_t *rbm_leaf_init(rbmope6_t *rope)
 	return p;
 }
 
-rbmope6_t *rbm_init(int max_runs)
+rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs)
 {
 	rbmope6_t *rope;
 	rope = calloc(1, sizeof(rbmope6_t));
 	if (max_runs < 4) max_runs = 4;
+	rope->n_threads = n_threads;
+	rope->max_seqs = max_seqs;
 	rope->max_runs = (max_runs + 1)>>1<<1; // make it an even number
 	rope->node = mp_init(sizeof(node_t));
 	rope->str  = mp_init(rope->max_runs);
