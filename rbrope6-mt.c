@@ -54,6 +54,7 @@ static inline void *mp_alloc(mempool_t *mp)
 
 #define MAX_HEIGHT 80
 #define MAX_RUNLEN 31
+#define MIN_RECODE 4
 
 typedef struct rbrnode_s {
 	union {
@@ -351,31 +352,38 @@ static void modify_multi1(rbmope6_t *rope, int n, probe1_t *u)
 {
 	int i, j, c[6];
 	node_t *p;
-	uint8_t *s, *t;
-	enc1_t *e;
 	memset(c, 0, 6 * sizeof(int));
 	for (i = 0; i < n; ++i) c[u[i].a] += 2;
 	for (p = u->p; p; p = p->parent)
 		for (i = 0; i < 6; ++i) p->c[i] += c[i];
 	p = u->p;
-	t = p->x[1].s;
-	e->s = s = malloc((n<<1) + rope->max_runs);
-	e->last_c = -1; e->last_l = 0;
-	for (i = j = 0; i < p->x[0].n; ++i) {
-		if (i == u[j].pos>>16) {
-			int l = u[j].pos&0xffff;
-			do {
-				enc1(e, (u[j].pos&0xffff) - l, t[i]&7);
-				enc1(e, 1, u[j].a);
-				l = u[j++].pos&0xffff;
-			} while (j < n && u[j].pos>>16 == i);
-			enc1(e, (p->x[1].s[i]>>3) - l, t[i]&7);
-		} else enc1(e, t[i]>>3, t[i]&7);
+	if (n == 1) {
+		insert_at(p, u->a, u->pos);
+		fix(rope, p, 0);
+	} else if (n < MIN_RECODE && (n<<1) + p->x[0].n <= rope->max_runs) {
+		for (i = n - 1; i >= 0; --i)
+			insert_at(p, u[i].a, u[i].pos);
+		fix(rope, p, 0);
+	} else { // the generic case
+		enc1_t *e;
+		uint8_t *s, *t = p->x[1].s;
+		e->s = s = malloc(n + rope->max_runs + (n > rope->max_runs? n : rope->max_runs)*2 + 2); // s will be freed by fix()
+		e->last_c = -1; e->last_l = 0;
+		for (i = j = 0; i < p->x[0].n; ++i) {
+			if (j < n && i == u[j].pos>>16) {
+				int l = 0;
+				do {
+					enc1(e, (u[j].pos&0xffff) - l, t[i]&7);
+					enc1(e, 1, u[j].a);
+					l = u[j++].pos&0xffff;
+				} while (j < n && u[j].pos>>16 == i);
+				enc1(e, (p->x[1].s[i]>>3) - l, t[i]&7);
+			} else enc1(e, t[i]>>3, t[i]&7);
+		}
+		enc1(e, 0, -2);
+		t = p->x[1].s; p->x[1].s = s;
+		fix(rope, p, t);
 	}
-	enc1(e, 0, -2);
-	t = p->x[1].s; p->x[1].s = s;
-	fix(rope, p, t);
-	free(s);
 }
 
 static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
