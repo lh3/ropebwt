@@ -60,8 +60,9 @@ typedef struct rbrnode_s {
 		uint8_t *s; // string; leaf.x[1] only
 		int n; // number of runs; leaf.x[0] only
 	} x[2];
+	struct rbrnode_s *parent;
 	uint64_t c[6];
-} rbrnode_t;
+} node_t;
 
 #define is_red(_p) ((_p)->c[0]&1)
 #define set_red(_p) ((_p)->c[0] |= 1)
@@ -76,12 +77,12 @@ typedef struct rbrnode_s {
 struct rbrope6_s {
 	int max_runs;
 	mempool_t *node, *str;
-	rbrnode_t *root;
+	node_t *root;
 };
 
-static rbrnode_t *rbr_leaf_init(rbrope6_t *rope)
+static node_t *rbr_leaf_init(rbrope6_t *rope)
 {
-	rbrnode_t *p;
+	node_t *p;
 	p = mp_alloc(rope->node); // $p has been filled with zeros
 	set_leaf(p);
 	p->x[1].s = mp_alloc(rope->str);
@@ -94,7 +95,7 @@ rbrope6_t *rbr_init(int max_runs)
 	rope = calloc(1, sizeof(rbrope6_t));
 	if (max_runs < 4) max_runs = 4;
 	rope->max_runs = (max_runs + 1)>>1<<1; // make it an even number
-	rope->node = mp_init(sizeof(rbrnode_t));
+	rope->node = mp_init(sizeof(node_t));
 	rope->str  = mp_init(rope->max_runs);
 	rope->root = rbr_leaf_init(rope);
 	return rope;
@@ -107,9 +108,58 @@ void rbr_destroy(rbrope6_t *rope)
 	free(rope);
 }
 
-static inline void split_leaf(rbrope6_t *rope, rbrnode_t *p)
+static inline void update_count(node_t *p) // recompute counts from the two children; p MUST BE internal
 {
-	rbrnode_t *q[2];
+	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1 | (p->c[0]&1);
+	p->c[1] = ((p->x[0].p->c[1]>>1) + (p->x[1].p->c[1]>>1))<<1;
+	p->c[2] = ((p->x[0].p->c[2]>>1) + (p->x[1].p->c[2]>>1))<<1;
+	p->c[3] = ((p->x[0].p->c[3]>>1) + (p->x[1].p->c[3]>>1))<<1;
+	p->c[4] = ((p->x[0].p->c[4]>>1) + (p->x[1].p->c[4]>>1))<<1;
+	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
+}
+
+static inline node_t *insert_fix(node_t *root, node_t *q)
+{
+	while (q && q->parent) {
+		node_t *p = q->parent, *u, *g, *gg;
+		int i, j;
+		if (!is_red(p)) break; // p: parent
+		if ((g = p->parent) == 0) break; // g: grandparent
+		i = (g->x.p[1] == p); j = !i;
+		u = g->x.p[j].p;
+		if (is_red(u)) {
+			set_black(u);
+			set_black(p);
+			set_red(g);
+			q = g;
+		} else {
+			if (p->x[i].p != q) {
+				node_t *s = p->x[j].p;
+				p->x[j].p = s->x[i].p; s->x[i].p->parent = p; update_count(p);
+				s->x[i].p = p; p->parent = s; update_count(s);
+				g->x[i].p = s; s->parent = g;
+				p = s;
+			}
+			gg = g->parent;
+			set_red(g);
+			set_black(p);
+			g->x[i].p = p->x[j].p; p->x[j].p->parent = g; update_count(g);
+			p->x[j].p = g; g->parent = p; update_count(p);
+			if (gg == 0) {
+				p->parent = 0;
+				set_black(p);
+				return p;
+			} else gg->x.p[(gg->x[1].p == g)] = p, p->parent = gg;
+			else p->parent = 0;
+			break;
+		}
+	}
+	return 0;
+}
+
+static inline void split_leaf(rbrope6_t *rope, node_t *p)
+{
+	node_t *q[2];
 	uint8_t *s;
 	int i;
 	q[0] = mp_alloc(rope->node);
@@ -122,7 +172,7 @@ static inline void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	for (i = 0, s = q[1]->x[1].s; i < q[1]->x[0].n; ++i) // compute q[1]->c[]
 		q[1]->c[s[i]&7] += s[i]>>3<<1;
 	// compute q[0]
-	memcpy(q[0], p, sizeof(rbrnode_t)); // copy everything to q[0], including p->x[0].s and p->c[]
+	memcpy(q[0], p, sizeof(node_t)); // copy everything to q[0], including p->x[0].s and p->c[]
 	q[0]->x[0].n = rope->max_runs>>1;
 	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i]&(~1ULL);
 	// finalize p
@@ -130,26 +180,49 @@ static inline void split_leaf(rbrope6_t *rope, rbrnode_t *p)
 	p->x[0].p = q[0]; p->x[1].p = q[1];
 }
 
-static int insert_to_leaf(rbrnode_t *p, int a, int x)
+static int probe_leaf(const node_t *p, int a, int x, int *_i, int *rest)
+{
+	int r[6], i, l = 0, len;
+	const uint8_t *s = p->x[1].s;
+	if (p->x[0].n == 0) {
+		*_i = -1; *rest = 0;
+		return 0;
+	}
+	len = rbr_strlen(p);
+	if (x < len>>1) { // forward search
+		for (i = 0; i < 6; ++i) r[i] = 0;
+		do {
+			l += *s>>3;
+			r[*s&7] += *s>>3;
+			++s;
+		} while (l < x);
+	} else { // backward search
+		__builtin_prefetch(p->x[1].p, 0);
+		for (i = 0; i < 6; ++i) r[i] = p->c[i]>>1;
+		l = len, s += p->x[0].n;
+		do {
+			--s;
+			l -= *s>>3;
+			r[*s&7] -= *s>>3;
+		} while (l >= x);
+		l += *s>>3; r[*s&7] += *s>>3; ++s;
+	}
+	r[*--s&7] -= l - x; // $s now points to the left-most run where $a can be inserted
+	*_i = s - p->x[1].s;
+	*rest = l - x;
+	return r[a];
+}
+
+static void insert_at(node_t *p, int a, int i, int rest)
 {
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
 
-	int r[6], i, l;
 	uint8_t *s = p->x[1].s;
-	if (p->x[0].n == 0) { // if $s is empty, that is easy
+	if (i < 0) { // p is empty
 		s[p->x[0].n++] = 1<<3 | a;
-		return 0;
+		return;
 	}
-	memset(r, 0, 24);
-	i = l = 0;
-	do { // this loop is likely to be the bottleneck
-		register int c = s[i++];
-		l += c>>3;
-		r[c&7] += c>>3;
-	} while (l < x);
-	assert(i <= p->x[0].n);
-	r[s[--i]&7] -= l - x; // $i now points to the left-most run where $a can be inserted
-	if (l == x && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
+	if (rest == 0 && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
 	if ((s[i]&7) == a) { // insert to a long $a run
 		if (s[i]>>3 == MAX_RUNLEN) { // the run is full
 			for (++i; i != p->x[0].n && (s[i]&7) == a; ++i); // find the end of the long run
@@ -158,10 +231,10 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 				_insert_after(p->x[0].n, s, i, 1<<3|a);
 			} else s[i] += 1<<3;
 		} else s[i] += 1<<3;
-	} else if (l == x) { // insert to the end of run; in this case, neither this and the next run is $a
+	} else if (rest == 0) { // insert to the end of run; in this case, neither this and the next run is $a
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
 	} else if (i != p->x[0].n - 1 && (s[i]&7) == (s[i+1]&7)) { // insert to a long non-$a run
-		int rest = l - x, c = s[i]&7;
+		int c = s[i]&7;
 		s[i] -= rest<<3;
 		_insert_after(p->x[0].n, s, i, 1<<3 | a);
 		for (i += 2; i != p->x[0].n && (s[i]&7) == c; ++i); // find the end of the long run
@@ -173,25 +246,14 @@ static int insert_to_leaf(rbrnode_t *p, int a, int x)
 		} else s[i] += rest<<3;
 	} else { // insert to a short run
 		memmove(s + i + 3, s + i + 1, p->x[0].n - i - 1);
-		s[i]  -= (l-x)<<3;
+		s[i]  -= rest<<3;
 		s[i+1] = 1<<3 | a;
-		s[i+2] = (l-x)<<3 | (s[i]&7);
+		s[i+2] = rest<<3 | (s[i]&7);
 		p->x[0].n += 2;
 	}
-	return r[a];
 }
 
-static inline void update_count(rbrnode_t *p) // recompute counts from the two children; p MUST BE internal
-{
-	p->c[0] = ((p->x[0].p->c[0]>>1) + (p->x[1].p->c[0]>>1))<<1 | (p->c[0]&1);
-	p->c[1] = ((p->x[0].p->c[1]>>1) + (p->x[1].p->c[1]>>1))<<1;
-	p->c[2] = ((p->x[0].p->c[2]>>1) + (p->x[1].p->c[2]>>1))<<1;
-	p->c[3] = ((p->x[0].p->c[3]>>1) + (p->x[1].p->c[3]>>1))<<1;
-	p->c[4] = ((p->x[0].p->c[4]>>1) + (p->x[1].p->c[4]>>1))<<1;
-	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
-}
-
-static void rbr_print_node(const rbrnode_t *p)
+static void rbr_print_node(const node_t *p)
 {
 	if (is_leaf(p)) {
 		int i, j;
@@ -210,57 +272,54 @@ static void rbr_print_node(const rbrnode_t *p)
 
 void rbr_print(const rbrope6_t *rope) { rbr_print_node(rope->root); putchar('\n'); }
 
+typedef struct {
+	int i, rest, k, a;
+	int64_t z;
+	node_t *pa[MAX_HEIGHT]; // parents array (pa[0] is special cased)
+	int8_t da[MAX_HEIGHT];
+} probe1_t;
+
+static int probe_rope(const rbrope6_t *rope, int a, int64_t x, probe1_t *t)
+{
+	const node_t *p;
+	int dir, k, c;
+	int64_t y;
+	uint8_t *lock;
+	for (c = 0, t->z = 0; c < a; ++c) t->z += rope->root->c[c]>>1;
+	t->pa[0] = (node_t*)&rope->root; t->da[0] = 0; // this is a trick learnt from libavl
+	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
+		int l = rbr_strlen(p->x[0].p);
+		if (x > l + y) dir = 1, y += l, t->z += p->x[0].p->c[a]>>1;
+		else dir = 0;
+		t->pa[k] = (node_t*)p;
+		t->da[k++] = dir;
+	}
+	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
+	t->pa[k] = (node_t*)p;
+	t->z += probe_leaf(p, a, x - y, &t->i, &t->rest) + 1;
+	t->k = k; t->a = a;
+	return 0;
+}
+
+static void update_rope(rbrope6_t *rope, probe1_t *u)
+{
+	int i, k = u->k;
+	for (i = 1; i <= k; ++i) u->pa[i]->c[u->a] += 2;
+	insert_at(u->pa[k], u->a, u->i, u->rest);
+	if (u->pa[k]->x[0].n + 2 <= rope->max_runs) return;
+	split_leaf(rope, u->pa[k]); set_red(u->pa[k]);
+	rope->root = insert_fix(u->pa[u->k]);
+}
+
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
 uint64_t rbr_insert_symbol(rbrope6_t *rope, int a, uint64_t x)
 {
-	rbrnode_t *p, *pa[MAX_HEIGHT];
-	uint64_t z, y, l;
-	int da[MAX_HEIGHT], dir, k, c;
-
-	for (c = 0, z = 0; c < a; ++c) z += rope->root->c[c]>>1; // $z equals the number of symbols smaller than $a
-	// pinpoint the node where $a is inserted
-	da[0] = 0; pa[0] = (rbrnode_t*)&rope->root; // this is a trick learnt from libavl
-	for (p = rope->root, y = 0, k = 1; !is_leaf(p); p = p->x[dir].p) {
-		l = rbr_strlen(p->x[0].p);
-		if (x > l + y) dir = 1, y += l, z += p->x[0].p->c[a]>>1;
-		else dir = 0;
-		pa[k] = p;
-		da[k++] = dir;
-		p->c[a] += 2;
-	}
-	assert(k < MAX_HEIGHT);
-	p->c[a] += 2; // the leaf count has not been updated
-	z += insert_to_leaf(p, a, x - y) + 1; // NB: $p always has enough room for one insert; +1 to include $rope[$x], which equals $a
-	if (p->x[0].n + 2 <= rope->max_runs) return z;
-	// we need to split $p and rebalance the red-black rope
-	split_leaf(rope, p); set_red(p);
-	while (k >= 3 && is_red(pa[k - 1])) {
-		int i = da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
-		rbrnode_t *r = pa[k - 2]->x[j].p; // $r points to the uncle
-		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
-			set_black(r);
-			set_black(pa[k - 1]);
-			set_red(pa[k - 2]); // grandparent to red
-			k -= 2;
-		} else {
-			rbrnode_t *t;
-			if (da[k - 1] != i) { // if the child and the parent are on different sides: 
-				t = pa[k - 1]; // $t: parent node
-				r = t->x[j].p; // $r: sibling node
-				t->x[j].p = r->x[i].p; update_count(t); // rotate to the same side
-				r->x[i].p = t; update_count(r);
-				pa[k - 2]->x[i].p = r;
-			} else r = pa[k - 1];
-			t = pa[k - 2];
-			set_red(t);
-			set_black(r);
-			t->x[i].p = r->x[j].p; update_count(t);
-			r->x[j].p = t; update_count(r);
-			pa[k - 3]->x[da[k - 3]].p = r; // when k==3, this line will automatically change the root
-			break;
-		}
-	}
-	set_black(rope->root); // $root is always black
+	int64_t z;
+	probe1_t *u;
+	u = alloca(sizeof(probe1_t));
+	probe_rope(rope, a, x, u);
+	z = u->z;
+	update_rope(rope, u);
 	return z;
 }
 
@@ -274,14 +333,14 @@ void rbr_insert_string(rbrope6_t *rope, int l, uint8_t *str)
 
 struct rbriter_s {
 	const rbrope6_t *rope;
-	const rbrnode_t *pa[MAX_HEIGHT];
+	const node_t *pa[MAX_HEIGHT];
 	int k, da[MAX_HEIGHT];
 };
 
 rbriter_t *rbr_iter_init(const rbrope6_t *rope)
 {
 	rbriter_t *iter;
-	const rbrnode_t *p;
+	const node_t *p;
 	iter = calloc(1, sizeof(rbriter_t));
 	iter->rope = rope;
 	for (p = rope->root; !is_leaf(p); p = p->x[0].p, ++iter->k) // descend to the left-most leaf
@@ -299,7 +358,7 @@ const uint8_t *rbr_iter_next(rbriter_t *iter, int *n)
 	// find the next leaf
 	while (iter->k >= 1 && iter->da[iter->k - 1]) --iter->k;
 	if (--iter->k >= 0) {
-		const rbrnode_t *p = iter->pa[iter->k];
+		const node_t *p = iter->pa[iter->k];
 		iter->da[iter->k] = 1;
 		p = iter->pa[iter->k++] = p->x[1].p;
 		for (; !is_leaf(p); p = p->x[0].p, ++iter->k)
