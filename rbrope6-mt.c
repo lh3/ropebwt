@@ -290,21 +290,21 @@ static void rbm_print_node(const node_t *p)
 
 void rbm_print(const rbmope6_t *rope) { rbm_print_node(rope->root); putchar('\n'); }
 
-static int probe(const rbmope6_t *rope, probe1_t *t)
+static int probe(const rbmope6_t *rope, probe1_t *u)
 {
 	const node_t *p;
 	int dir, c;
-	int64_t x = t->z, y;
+	int64_t x = u->z, y;
 	uint8_t *lock;
-	for (c = 0, t->z = 0; c < t->a; ++c) t->z += rope->root->c[c]>>1;
+	for (c = 0, u->z = 0; c < u->a; ++c) u->z += rope->root->c[c]>>1;
 	for (p = rope->root, y = 0; !is_leaf(p); p = p->x[dir].p) {
 		int l = rbm_strlen(p->x[0].p);
-		if (x > l + y) dir = 1, y += l, t->z += p->x[0].p->c[t->a]>>1;
+		if (x > l + y) dir = 1, y += l, u->z += p->x[0].p->c[u->a]>>1;
 		else dir = 0;
 	}
 	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
-	t->p = (node_t*)p;
-	t->z += probe_leaf(p, t->a, x - y, &t->pos) + 1;
+	u->p = (node_t*)p;
+	u->z += probe_leaf(p, u->a, x - y, &u->pos) + 1;
 	return 0;
 }
 
