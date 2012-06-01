@@ -374,33 +374,26 @@ void rbm_update_multi(rbmope6_t *rope)
 	int i, l, m, n;
 	for (i = 0; i < rope->n_seqs; ++i) {
 		probe1_t *u = &rope->state[i];
-		u->z = rope->root->c[0]>>1;
-		u->a = rope->buf[i][0];
 		u->i = i;
+		u->a = rope->buf[i][0];
+		u->z = rope->root->c[0]>>1;
 	}
 	n = rope->n_seqs;
 	for (l = 1; n; ++l) {
-		int64_t c[6];
-		// modify
-		// probe
-		for (i = 0; i < n; ++i)
-			probe(rope, &rope->state[i]);
-		// update state->z and state->a
+		for (i = 0; i < n; ++i) probe(rope, &rope->state[i]);
+		// modify here
 		ks_introsort(rbm, n, rope->state);
-		memset(c, 0, 48);
+		for (i = 0; i < n; ++i) rope->state[i].z += i; // get the correct insertion coordinate
+		for (i = m = 0; i < n; ++i) // exclude finished sequences
+			if (rope->state[i].a) {
+				if (m == i) ++m;
+				else rope->state[m++] = rope->state[i];
+			}
+		n = m;
 		for (i = 0; i < n; ++i) {
 			probe1_t *u = &rope->state[i];
-			u->z += c[u->a];
-			++c[u->a];
-			u->a = l+1 < rope->len[u->i]? rope->buf[u->i][l+1] : l+1 == rope->len[u->i]? 0 : 7;
+			u->a = l < rope->len[u->i]? rope->buf[u->i][l] : 0;
 		}
-		for (i = 1; i < 6; ++i) c[i] += c[i - 1]; // accumulative
-		for (i = 0; i < n; ++i) rope->state[i].z += c[rope->state[i].a];
-		for (i = m = 0; i < n; ++i) {
-			if (rope->state[i].a < 7 && m != i) rope->state[m++] = rope->state[i];
-			else if (rope->state[i].a < 7) ++m;
-		}
-		n = m;
 	}
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
 	rope->n_seqs = 0;
