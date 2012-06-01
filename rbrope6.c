@@ -60,6 +60,7 @@ typedef struct rbrnode_s {
 		uint8_t *s; // string; leaf.x[1] only
 		int n; // number of runs; leaf.x[0] only
 	} x[2];
+	struct rbrnode_s *parent;
 	uint64_t c[6];
 } node_t;
 
@@ -117,35 +118,43 @@ static inline void update_count(node_t *p) // recompute counts from the two chil
 	p->c[5] = ((p->x[0].p->c[5]>>1) + (p->x[1].p->c[5]>>1))<<1;
 }
 
-static inline void insert_fix(int k, node_t **pa, const int8_t *da)
+static inline node_t *insert_fix(node_t *root, node_t *q)
 {
-	while (k >= 3 && is_red(pa[k - 1])) { // rebalance the red-black tree
-		int i = da[k - 2], j = !i; // $i: direction of the parent; $j: dir of uncle
-		node_t *r = pa[k - 2]->x[j].p; // $r points to the uncle
-		if (is_red(r)) { // if uncle is red, then grandparent must be black; switch colors and move upwards
-			set_black(r);
-			set_black(pa[k - 1]);
-			set_red(pa[k - 2]); // grandparent to red
-			k -= 2;
+	while (q && q->parent) {
+		node_t *p = q->parent, *u, *g, *gg;
+		int i, j;
+		if (!is_red(p)) break; // p: parent
+		if ((g = p->parent) == 0) break; // g: grandparent
+		i = (g->x.p[1] == p); j = !i;
+		u = g->x.p[j].p;
+		if (is_red(u)) {
+			set_black(u);
+			set_black(p);
+			set_red(g);
+			q = g;
 		} else {
-			node_t *t;
-			if (da[k - 1] != i) { // if the child and the parent are on different sides: 
-				t = pa[k - 1]; // $t: parent node
-				r = t->x[j].p; // $r: sibling node
-				t->x[j].p = r->x[i].p; update_count(t); // rotate to the same side
-				r->x[i].p = t; update_count(r);
-				pa[k - 2]->x[i].p = r;
-			} else r = pa[k - 1];
-			t = pa[k - 2];
-			set_red(t);
-			set_black(r);
-			t->x[i].p = r->x[j].p; update_count(t);
-			r->x[j].p = t; update_count(r);
-			pa[k - 3]->x[da[k - 3]].p = r; // when k==3, this line will automatically change the root
+			if (p->x[i].p != q) {
+				node_t *s = p->x[j].p;
+				p->x[j].p = s->x[i].p; s->x[i].p->parent = p; update_count(p);
+				s->x[i].p = p; p->parent = s; update_count(s);
+				g->x[i].p = s; s->parent = g;
+				p = s;
+			}
+			gg = g->parent;
+			set_red(g);
+			set_black(p);
+			g->x[i].p = p->x[j].p; p->x[j].p->parent = g; update_count(g);
+			p->x[j].p = g; g->parent = p; update_count(p);
+			if (gg == 0) {
+				p->parent = 0;
+				set_black(p);
+				return p;
+			} else gg->x.p[(gg->x[1].p == g)] = p, p->parent = gg;
+			else p->parent = 0;
 			break;
 		}
 	}
-	set_black(*(node_t**)pa[0]); // *(node_t**)pa[0] is the root; set black at the root
+	return 0;
 }
 
 static inline void split_leaf(rbrope6_t *rope, node_t *p)
@@ -299,7 +308,7 @@ static void update_rope(rbrope6_t *rope, probe1_t *u)
 	insert_at(u->pa[k], u->a, u->i, u->rest);
 	if (u->pa[k]->x[0].n + 2 <= rope->max_runs) return;
 	split_leaf(rope, u->pa[k]); set_red(u->pa[k]);
-	insert_fix(u->k, u->pa, u->da);
+	rope->root = insert_fix(u->pa[u->k]);
 }
 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
