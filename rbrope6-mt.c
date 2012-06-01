@@ -75,7 +75,9 @@ typedef struct rbrnode_s {
 #define rbm_strlen(_p) (((_p)->c[0]>>1) + ((_p)->c[1]>>1) + ((_p)->c[2]>>1) + ((_p)->c[3]>>1) + ((_p)->c[4]>>1) + ((_p)->c[5]>>1))
 
 struct rbmope6_s {
-	int max_runs, n_threads, max_seqs;
+	int max_runs, n_threads, max_seqs, n_seqs;
+	int *len;
+	uint8_t **buf;
 	mempool_t *node, *str;
 	node_t *root;
 };
@@ -96,6 +98,8 @@ rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs)
 	if (max_runs < 4) max_runs = 4;
 	rope->n_threads = n_threads;
 	rope->max_seqs = max_seqs;
+	rope->buf = malloc(sizeof(void*) * max_seqs);
+	rope->len = malloc(sizeof(int) * max_seqs);
 	rope->max_runs = (max_runs + 1)>>1<<1; // make it an even number
 	rope->node = mp_init(sizeof(node_t));
 	rope->str  = mp_init(rope->max_runs);
@@ -105,6 +109,9 @@ rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs)
 
 void rbm_destroy(rbmope6_t *rope)
 {
+	int i;
+	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
+	free(rope->buf); free(rope->len);
 	mp_destroy(rope->node);
 	mp_destroy(rope->str);
 	free(rope);
@@ -321,12 +328,26 @@ uint64_t rbm_insert_symbol(rbmope6_t *rope, int a, uint64_t x)
 	return z;
 }
 
+void rbm_update(rbmope6_t *rope)
+{
+	int i;
+	for (i = 0; i < rope->n_seqs; ++i) {
+		int l = rope->len[i];
+		uint64_t x = rope->root->c[0]>>1;
+		for (--l; l >= 0; --l)
+			x = rbm_insert_symbol(rope, rope->buf[i][l], x);
+		rbm_insert_symbol(rope, 0, x);
+	}
+	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
+	rope->n_seqs = 0;
+}
+
 void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str)
 {
-	uint64_t x = rope->root->c[0]>>1;
-	for (--l; l >= 0; --l)
-		x = rbm_insert_symbol(rope, str[l], x);
-	rbm_insert_symbol(rope, 0, x);
+	rope->buf[rope->n_seqs] = malloc(l);
+	memcpy(rope->buf[rope->n_seqs], str, l);
+	rope->len[rope->n_seqs++] = l;
+	if (rope->n_seqs == rope->max_seqs) rbm_update(rope);
 }
 
 struct rbmiter_s {
