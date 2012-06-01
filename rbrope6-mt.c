@@ -76,8 +76,7 @@ typedef struct rbrnode_s {
 
 typedef struct {
 	node_t *p;
-	uint32_t pos; // higher 16 bits: position; lower: insert after symbols
-	int32_t i;
+	uint64_t x;
 	uint64_t z:61, a:3;
 } probe1_t;
 
@@ -307,16 +306,16 @@ static int probe(const rbmope6_t *rope, probe1_t *u)
 	const node_t *p;
 	int dir, c;
 	int64_t x = u->z, y;
-	uint8_t *lock;
+	uint32_t tmp;
 	for (c = 0, u->z = 0; c < u->a; ++c) u->z += rope->root->c[c]>>1;
 	for (p = rope->root, y = 0; !is_leaf(p); p = p->x[dir].p) {
 		int l = rbm_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, u->z += p->x[0].p->c[u->a]>>1;
 		else dir = 0;
 	}
-	lock = (uint8_t*)p->x[1].s + rope->max_runs - 1;
 	u->p = (node_t*)p;
-	u->z += probe_leaf(p, u->a, x - y, &u->pos) + 1;
+	u->z += probe_leaf(p, u->a, x - y, &tmp) + 1;
+	u->x = u->x<<32>>32 | (uint64_t)tmp<<32;
 	return 0;
 }
 
@@ -324,7 +323,7 @@ static void modify(rbmope6_t *rope, const probe1_t *u)
 {
 	node_t *p;
 	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
-	insert_at(u->p, u->a, u->pos);
+	insert_at(u->p, u->a, u->x>>32);
 	fix(rope, u->p, 0);
 }
 
@@ -376,7 +375,7 @@ void rbm_update_multi(rbmope6_t *rope)
 		probe1_t *u = &rope->state[i];
 		u->z = rope->root->c[0]>>1;
 		u->a = rope->buf[i][0];
-		u->i = i;
+		u->x = i;
 	}
 	n = rope->n_seqs;
 	for (l = 1; n; ++l) {
@@ -390,9 +389,10 @@ void rbm_update_multi(rbmope6_t *rope)
 		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
 			probe1_t *u = &rope->state[i];
+			int j = (int32_t)u->x;
 			u->z += c[u->a];
 			++c[u->a];
-			u->a = l+1 < rope->len[u->i]? rope->buf[u->i][l+1] : l+1 == rope->len[u->i]? 0 : 7;
+			u->a = l+1 < rope->len[j]? rope->buf[j][l+1] : l+1 == rope->len[j]? 0 : 7;
 		}
 		for (i = 1; i < 6; ++i) c[i] += c[i - 1]; // accumulative
 		for (i = 0; i < n; ++i) rope->state[i].z += c[rope->state[i].a];
