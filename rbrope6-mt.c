@@ -58,7 +58,7 @@ typedef struct rbrnode_s {
 	union {
 		struct rbrnode_s *p; // pointer to children; internal node only
 		uint8_t *s; // string; leaf.x[1] only
-		int n; // number of runs; leaf.x[0] only
+		int64_t n; // number of runs; leaf.x[0] only
 	} x[2];
 	struct rbrnode_s *parent;
 	uint64_t c[6];
@@ -174,28 +174,39 @@ static inline node_t *insert_fix(node_t *q)
 	return 0;
 }
 
-static inline void split_leaf(rbmope6_t *rope, node_t *p)
+static inline void fix(rbmope6_t *rope, node_t *p, int is_free)
 {
-	node_t *q[2];
-	uint8_t *s;
-	int i;
-	q[0] = mp_alloc(rope->node);
-	q[1] = rbm_leaf_init(rope);
-	// compute q[1]
-	s = p->x[1].s;
-	memcpy(q[1]->x[1].s, s + (rope->max_runs>>1), rope->max_runs>>1); // copy the later half to q[1]
-	memset(s + (rope->max_runs>>1), 0, rope->max_runs>>1); // clear the later half
-	q[1]->x[0].n = p->x[0].n - (rope->max_runs>>1);
-	for (i = 0, s = q[1]->x[1].s; i < q[1]->x[0].n; ++i) // compute q[1]->c[]
-		q[1]->c[s[i]&7] += s[i]>>3<<1;
-	// compute q[0]
-	memcpy(q[0], p, sizeof(node_t)); // copy everything to q[0], including p->x[0].s and p->c[]
-	q[0]->x[0].n = rope->max_runs>>1;
-	for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i]&(~1ULL);
-	// finalize p
-	set_internal(p);
-	p->x[0].p = q[0]; q[0]->parent = p;
-	p->x[1].p = q[1]; q[1]->parent = p;
+	while (p->x[0].n + 2 > rope->max_runs) {
+		int i, n1 = p->x[0].n >> 1;
+		node_t *q[2], *t;
+		uint8_t *s;
+		if (n1 + 2 > rope->max_runs) n1 = (rope->max_runs>>1) + (rope->max_runs>>2);
+		q[0] = mp_alloc(rope->node);
+		q[1] = rbm_leaf_init(rope);
+		// get q[1]
+		s = p->x[1].s;
+		memcpy(q[1]->x[1].s, s + (p->x[0].n - n1), n1); // copy the later half to q[1]
+		memset(s + (p->x[0].n - n1), 0, n1); // clear the later half
+		q[1]->x[0].n = n1;
+		for (i = 0, s = q[1]->x[1].s; i < n1; ++i) // compute q[1]->c[]
+			q[1]->c[s[i]&7] += s[i]>>3<<1;
+		// get q[0]
+		*q[0] = *p; // copy everything to q[0], including p->x[0].s and p->c[]
+		q[0]->x[0].n = rope->max_runs>>1;
+		for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i]&(~1ULL);
+		// update p and rebalance
+		set_internal(p); set_red(p);
+		p->x[0].p = q[0]; q[0]->parent = p;
+		p->x[1].p = q[1]; q[1]->parent = p;
+		if ((t = insert_fix(p)) != 0) rope->root = t;
+		p = q[0];
+	}
+	if (is_free) {
+		uint8_t *s = p->x[1].s;
+		p->x[1].s = mp_alloc(rope->str);
+		memcpy(p->x[1].s, s, p->x[0].n);
+		free(s);
+	}
 }
 
 static int probe_leaf(const node_t *p, int a, int x, uint32_t *pos)
@@ -314,9 +325,7 @@ static void modify(rbmope6_t *rope, const probe1_t *u)
 	node_t *p;
 	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
 	insert_at(u->p, u->a, u->pos);
-	if (u->p->x[0].n + 2 <= rope->max_runs) return;
-	split_leaf(rope, u->p); set_red(u->p);
-	if ((p = insert_fix(u->p)) != 0) rope->root = p;
+	fix(rope, u->p, 0);
 }
 
 static void modify_multi(rbmope6_t *rope, int n, probe1_t *u) // all u->p MUST BE identical and u->i MUST BE sorted
