@@ -1,7 +1,7 @@
 CC=			gcc
 CFLAGS=		-g -Wall #-O2
 DFLAGS=		
-OBJS=		bprope6.o rbrope6.o
+OBJS=		bprope6.o rbrope6.o rbrope6-mt.o
 PROG=		ropebwt
 INCLUDES=	
 LIBS=		-lz
