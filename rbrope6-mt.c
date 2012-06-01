@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include "ksort.h"
 #include "rbrope6-mt.h"
 
 /***********************************
@@ -76,9 +77,12 @@ typedef struct rbrnode_s {
 
 typedef struct {
 	node_t *p;
-	uint64_t x;
+	uint32_t pos, i;
 	uint64_t z:61, a:3;
 } probe1_t;
+
+#define probe_lt(a, b) ((a).z < (b).z || ((a).z == (b).z && (a).i < (b).i))
+KSORT_INIT(rbm, probe1_t, probe_lt)
 
 struct rbmope6_s {
 	int max_runs, n_threads, max_seqs, n_seqs;
@@ -172,7 +176,7 @@ static inline node_t *insert_fix(node_t *q)
 	}
 	return 0;
 }
-
+// split bottom node $p if it is too long and rebalance the tree if necessary; if $s0 is not NULL, p->x[1].s will be freed and then directed to s0
 static inline void fix(rbmope6_t *rope, node_t *p, uint8_t *s0)
 {
 	while (p->x[0].n + 2 > rope->max_runs) {
@@ -305,7 +309,6 @@ static int probe(const rbmope6_t *rope, probe1_t *u)
 	const node_t *p;
 	int dir, c;
 	int64_t x = u->z, y;
-	uint32_t tmp;
 	for (c = 0, u->z = 0; c < u->a; ++c) u->z += rope->root->c[c]>>1;
 	for (p = rope->root, y = 0; !is_leaf(p); p = p->x[dir].p) {
 		int l = rbm_strlen(p->x[0].p);
@@ -313,8 +316,7 @@ static int probe(const rbmope6_t *rope, probe1_t *u)
 		else dir = 0;
 	}
 	u->p = (node_t*)p;
-	u->z += probe_leaf(p, u->a, x - y, &tmp) + 1;
-	u->x = u->x<<32>>32 | (uint64_t)tmp<<32;
+	u->z += probe_leaf(p, u->a, x - y, &u->pos) + 1;
 	return 0;
 }
 
@@ -322,7 +324,7 @@ static void modify(rbmope6_t *rope, const probe1_t *u)
 {
 	node_t *p;
 	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
-	insert_at(u->p, u->a, u->x>>32);
+	insert_at(u->p, u->a, u->pos);
 	fix(rope, u->p, 0);
 }
 
@@ -374,7 +376,7 @@ void rbm_update_multi(rbmope6_t *rope)
 		probe1_t *u = &rope->state[i];
 		u->z = rope->root->c[0]>>1;
 		u->a = rope->buf[i][0];
-		u->x = i;
+		u->i = i;
 	}
 	n = rope->n_seqs;
 	for (l = 1; n; ++l) {
@@ -383,15 +385,14 @@ void rbm_update_multi(rbmope6_t *rope)
 		// probe
 		for (i = 0; i < n; ++i)
 			probe(rope, &rope->state[i]);
-		// sort by u->p and then u->pos
 		// update state->z and state->a
+		ks_introsort(rbm, n, rope->state);
 		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
 			probe1_t *u = &rope->state[i];
-			int j = (int32_t)u->x;
 			u->z += c[u->a];
 			++c[u->a];
-			u->a = l+1 < rope->len[j]? rope->buf[j][l+1] : l+1 == rope->len[j]? 0 : 7;
+			u->a = l+1 < rope->len[u->i]? rope->buf[u->i][l+1] : l+1 == rope->len[u->i]? 0 : 7;
 		}
 		for (i = 1; i < 6; ++i) c[i] += c[i - 1]; // accumulative
 		for (i = 0; i < n; ++i) rope->state[i].z += c[rope->state[i].a];
