@@ -76,7 +76,8 @@ typedef struct rbrnode_s {
 
 typedef struct {
 	node_t *p;
-	uint64_t pos; // higher 32 bits: position; lower: insert after symbols
+	uint32_t pos; // higher 16 bits: position; lower: insert after symbols
+	int32_t i;
 	uint64_t z:61, a:3;
 } probe1_t;
 
@@ -197,12 +198,12 @@ static inline void split_leaf(rbmope6_t *rope, node_t *p)
 	p->x[1].p = q[1]; q[1]->parent = p;
 }
 
-static int probe_leaf(const node_t *p, int a, int x, uint64_t *pos)
+static int probe_leaf(const node_t *p, int a, int x, uint32_t *pos)
 {
 	int r[6], i, l = 0, len;
 	const uint8_t *s = p->x[1].s;
 	if (p->x[0].n == 0) {
-		*pos = (uint64_t)-1;
+		*pos = (uint32_t)-1;
 		return 0;
 	}
 	len = rbm_strlen(p);
@@ -225,21 +226,21 @@ static int probe_leaf(const node_t *p, int a, int x, uint64_t *pos)
 		l += *s>>3; r[*s&7] += *s>>3; ++s;
 	}
 	r[*--s&7] -= l - x; // $s now points to the left-most run where $a can be inserted
-	*pos = (uint64_t)(s - p->x[1].s)<<32 | ((*s>>3) - (l - x));
+	*pos = (uint32_t)(s - p->x[1].s)<<16 | ((*s>>3) - (l - x));
 	return r[a];
 }
 
-static void insert_at(node_t *p, int a, uint64_t pos)
+static void insert_at(node_t *p, int a, uint32_t pos)
 {
 #define _insert_after(_n, _s, _i, _b) if ((_i) + 1 != (_n)) memmove(_s+(_i)+2, _s+(_i)+1, (_n)-(_i)-1); _s[(_i)+1] = (_b); ++(_n)
 
 	uint8_t *s = p->x[1].s;
 	int i, rest;
-	if (pos == (uint64_t)-1) { // p is empty
+	if (pos == (uint32_t)-1) { // p is empty
 		s[p->x[0].n++] = 1<<3 | a;
 		return;
 	}
-	i = pos>>32; rest = (s[i]>>3) - (pos<<32>>32);
+	i = pos>>16; rest = (s[i]>>3) - (pos&0xffff);
 	if (rest == 0 && i != p->x[0].n - 1 && (s[i+1]&7) == a) ++i; // if insert to the end of $i, check if we'd better to the start of ($i+1)
 	if ((s[i]&7) == a) { // insert to a long $a run
 		if (s[i]>>3 == MAX_RUNLEN) { // the run is full
@@ -318,7 +319,7 @@ static void modify(rbmope6_t *rope, const probe1_t *u)
 	if ((p = insert_fix(u->p)) != 0) rope->root = p;
 }
 
-static void update_rope_multi(rbmope6_t *rope, int n, probe1_t *u) // all u->p MUST BE identical and u->i MUST BE sorted
+static void modify_multi(rbmope6_t *rope, int n, probe1_t *u) // all u->p MUST BE identical and u->i MUST BE sorted
 {
 	int i, j, c[6];
 	node_t *p;
@@ -368,7 +369,12 @@ void rbm_update_multi(rbmope6_t *rope)
 	}
 	n = rope->n_seqs;
 	for (l = 0;; ++l) {
-		for (i = 0; i < n; ++i);
+		// modify
+		// probe
+		for (i = 0; i < n; ++i)
+			probe(rope, &rope->state[i]);
+		// sort
+		// update state->z
 	}
 }
 
