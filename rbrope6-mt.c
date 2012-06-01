@@ -362,19 +362,38 @@ void rbm_update(rbmope6_t *rope)
 
 void rbm_update_multi(rbmope6_t *rope)
 {
-	int i, l, n;
+	int i, l, m, n;
 	for (i = 0; i < rope->n_seqs; ++i) {
-		rope->state[i].z = rope->root->c[0]>>1;
-		rope->state[i].a = rope->buf[i][0];
+		probe1_t *u = &rope->state[i];
+		u->z = rope->root->c[0]>>1;
+		u->a = rope->buf[i][0];
+		u->i = i;
 	}
 	n = rope->n_seqs;
-	for (l = 0;; ++l) {
+	for (l = 1; n; ++l) {
+		int64_t c[6];
 		// modify
 		// probe
 		for (i = 0; i < n; ++i)
 			probe(rope, &rope->state[i]);
-		// sort
-		// update state->z
+		// sort by u->p and then u->pos
+		// update state->z and state->a
+		memset(c, 0, 48);
+		for (i = 0; i < n; ++i) ++c[rope->state[i].a];
+		for (i = 1; i < 6; ++i) c[i] += c[i - 1];
+		for (i = 0; i < n; ++i) rope->state[i].z += c[rope->state[i].a];
+		memset(c, 0, 48);
+		for (i = 0; i < n; ++i) {
+			probe1_t *u = &rope->state[i];
+			u->z += c[u->a];
+			++c[u->a];
+			u->a = l+1 < rope->len[u->i]? rope->buf[u->i][l+1] : l+1 == rope->len[u->i]? 0 : 7;
+		}
+		for (i = m = 0; i < n; ++i) {
+			if (rope->state[i].a < 7 && m != i) rope->state[m++] = rope->state[i];
+			else if (rope->state[i].a < 7) ++m;
+		}
+		n = m;
 	}
 }
 
