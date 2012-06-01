@@ -328,20 +328,66 @@ static void modify(rbmope6_t *rope, const probe1_t *u)
 	fix(rope, u->p, 0);
 }
 
-static void modify_multi(rbmope6_t *rope, int n, probe1_t *u) // all u->p MUST BE identical and u->i MUST BE sorted
+typedef struct {
+	int last_l, last_c;
+	uint8_t *s;
+} enc1_t;
+
+static inline void enc1(enc1_t *e, int l, int c)
+{
+	if (c != e->last_c) {
+		if (e->last_l) {
+			while (e->last_l > 31) {
+				*e->s++ = 31<<3 | e->last_c;
+				e->last_l -= 31;
+			}
+			*e->s++ = e->last_l<<3 | e->last_c;
+		}
+		e->last_l = l; e->last_c = c;
+	} else e->last_l += l;
+}
+
+static void modify_multi1(rbmope6_t *rope, int n, probe1_t *u)
 {
 	int i, j, c[6];
 	node_t *p;
-	uint8_t *s;
+	uint8_t *s, *t;
+	enc1_t *e;
 	memset(c, 0, 6 * sizeof(int));
-	for (i = 0; i < n; ++i) c[u->a] += 2;
+	for (i = 0; i < n; ++i) c[u[i].a] += 2;
 	for (p = u->p; p; p = p->parent)
 		for (i = 0; i < 6; ++i) p->c[i] += c[i];
 	p = u->p;
-	s = malloc(n + rope->max_runs);
+	t = p->x[1].s;
+	e->s = s = malloc((n<<1) + rope->max_runs);
+	e->last_c = -1; e->last_l = 0;
 	for (i = j = 0; i < p->x[0].n; ++i) {
+		if (i == u[j].pos>>16) {
+			int l = u[j].pos&0xffff;
+			do {
+				enc1(e, (u[j].pos&0xffff) - l, t[i]&7);
+				enc1(e, 1, u[j].a);
+				l = u[j++].pos&0xffff;
+			} while (j < n && u[j].pos>>16 == i);
+			enc1(e, (p->x[1].s[i]>>3) - l, t[i]&7);
+		} else enc1(e, t[i]>>3, t[i]&7);
 	}
+	enc1(e, 0, -2);
+	t = p->x[1].s; p->x[1].s = s;
+	fix(rope, p, t);
 	free(s);
+}
+
+static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
+{
+	node_t *p = 0;
+	int i, last;
+	for (i = 0; i < n; ++i) {
+		if (u[i].p == p) continue;
+		if (i) modify_multi1(rope, i - last, &u[last]);
+		last = i; p = u[i].p;
+	}
+	modify_multi1(rope, i - last, &u[last]);
 }
 
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
