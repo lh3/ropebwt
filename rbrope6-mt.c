@@ -379,22 +379,22 @@ void rbm_update_multi(rbmope6_t *rope)
 		// sort by u->p and then u->pos
 		// update state->z and state->a
 		memset(c, 0, 48);
-		for (i = 0; i < n; ++i) ++c[rope->state[i].a];
-		for (i = 1; i < 6; ++i) c[i] += c[i - 1];
-		for (i = 0; i < n; ++i) rope->state[i].z += c[rope->state[i].a];
-		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
 			probe1_t *u = &rope->state[i];
 			u->z += c[u->a];
 			++c[u->a];
 			u->a = l+1 < rope->len[u->i]? rope->buf[u->i][l+1] : l+1 == rope->len[u->i]? 0 : 7;
 		}
+		for (i = 1; i < 6; ++i) c[i] += c[i - 1]; // accumulative
+		for (i = 0; i < n; ++i) rope->state[i].z += c[rope->state[i].a];
 		for (i = m = 0; i < n; ++i) {
 			if (rope->state[i].a < 7 && m != i) rope->state[m++] = rope->state[i];
 			else if (rope->state[i].a < 7) ++m;
 		}
 		n = m;
 	}
+	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
+	rope->n_seqs = 0;
 }
 
 void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str)
