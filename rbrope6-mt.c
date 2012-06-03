@@ -107,7 +107,7 @@ rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs)
 {
 	rbmope6_t *rope;
 	rope = calloc(1, sizeof(rbmope6_t));
-	if (max_runs < 4) max_runs = 4;
+	if (max_runs < 5) max_runs = 5; // cannot be smaller; otherwise fix() will not work
 	rope->n_threads = n_threads;
 	rope->max_seqs = max_seqs;
 	rope->buf = malloc(sizeof(void*) * max_seqs);

@@ -45,21 +45,22 @@ int main(int argc, char *argv[])
 	bprope6_t *bpr = 0;
 	gzFile fp;
 	kseq_t *ks;
-	int c, i, j, for_only = 0, print_rope = 0, max_runs = 512, max_nodes = 64, n_threads = 1;
+	int c, i, j, for_only = 0, print_rope = 0, max_runs = 512, max_nodes = 64, n_threads = 1, batch_size = 0x10000;
 	const uint8_t *s;
 
-	while ((c = getopt(argc, argv, "Tfr:n:t:")) >= 0)
+	while ((c = getopt(argc, argv, "Tfr:n:t:b:")) >= 0)
 		if (c == 'f') for_only = 1;
 		else if (c == 'T') print_rope = 1;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
 		else if (c == 't') n_threads = atoi(optarg);
+		else if (c == 'b') batch_size = atoi(optarg);
 	if (optind == argc) {
-		fprintf(stderr, "Usage: ropebwt [-fT] [-r maxRuns=%d] [-n maxNodes=%d] <in.fq.gz>\n", max_runs, max_nodes);
+		fprintf(stderr, "Usage: ropebwt [-fT] [-r maxRuns=%d] [-n maxNodes=%d] [-b batchSize=%d] <in.fq.gz>\n", max_runs, max_nodes, batch_size);
 		return 1;
 	}
 
-	if (n_threads > 1) rbm = rbm_init(n_threads, 0x100000, max_runs);
+	if (n_threads > 1) rbm = rbm_init(n_threads, batch_size, max_runs);
 	else if (max_nodes <= 2) rbr = rbr_init(max_runs);
 	else bpr = bpr_init(max_nodes, max_runs);
 	fp = gzopen(argv[optind], "rb");
