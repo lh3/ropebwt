@@ -196,7 +196,7 @@ static inline void fix(rbmope6_t *rope, node_t *p, uint8_t *s0)
 			q[1]->c[s[i]&7] += s[i]>>3<<1;
 		// get q[0]
 		*q[0] = *p; // copy everything to q[0], including p->x[0].s and p->c[]
-		q[0]->x[0].n = rope->max_runs>>1;
+		q[0]->x[0].n -= n1;
 		for (i = 0; i < 6; ++i) q[0]->c[i] -= q[1]->c[i]&(~1ULL);
 		// update p and rebalance
 		set_internal(p); set_red(p);
@@ -442,7 +442,9 @@ void rbm_update_bcr(rbmope6_t *rope)
 		// probe the insertion point and compute the pre-coordinate for the next insertion
 		for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs); // FIXME: should we use rope->n_seqs or n, or should we insert $ after we finish all sequences?
 		// perform insertion
+//		printf("+++ "); rbm_print(rope);
 		modify_multi(rope, n, rope->u);
+//		printf("--- "); rbm_print(rope);
 		// compute the insertion coordinate in the new BWT
 		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
