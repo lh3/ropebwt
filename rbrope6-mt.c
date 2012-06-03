@@ -86,6 +86,11 @@ typedef struct {
 #define probe_lt(a, b) ((a).z < (b).z)
 KSORT_INIT(rbm, probe1_t, probe_lt)
 
+typedef struct {
+	int start, step, n, toproc;
+	struct rbmope6_s *rope;
+} worker_t;
+
 struct rbmope6_s {
 	int max_runs, n_threads, max_seqs, n_seqs;
 	int *len;
@@ -93,7 +98,65 @@ struct rbmope6_s {
 	probe1_t *u;
 	mempool_t *node, *str;
 	node_t *root;
+	// for mt
+	pthread_t *tid;
+	worker_t *w;
+	pthread_mutex_t lock;
+	pthread_cond_t cv;
+	volatile int proc_cnt;
+	int done;
 };
+
+/**************
+ *** Worker ***
+ **************/
+
+static int probe(const rbmope6_t *rope, probe1_t *u, int m);
+void rbm_update(rbmope6_t *rope);
+
+static int worker_aux(worker_t *w)
+{
+	int i, stop = 0;
+	pthread_mutex_lock(&w->rope->lock);
+	while (!w->toproc && !w->rope->done)
+		pthread_cond_wait(&w->rope->cv, &w->rope->lock);
+	if (w->rope->done) stop = 1;
+	w->toproc = 0;
+	pthread_mutex_unlock(&w->rope->lock);
+	if (stop) return 1; // to quit the thread
+	for (i = w->start; i < w->n; i += w->step)
+		probe(w->rope, &w->rope->u[i], w->rope->n_seqs);
+	__sync_fetch_and_add(&w->rope->proc_cnt, 1);
+	return 0;
+}
+
+static void *worker(void *data)
+{
+	while (worker_aux(data) == 0);
+	return 0;
+}
+
+void rbm_finalize(rbmope6_t *rope)
+{
+	int i;
+	if (rope->done) return;
+	if (rope->n_seqs) rbm_update(rope);
+	if (rope->tid) {
+		pthread_mutex_lock(&rope->lock);
+		rope->done = 1; rope->proc_cnt = 0;
+		pthread_cond_broadcast(&rope->cv);
+		pthread_mutex_unlock(&rope->lock);
+		for (i = 1; i < rope->n_threads; ++i) pthread_join(rope->tid[i], 0);
+		pthread_cond_destroy(&rope->cv);
+		pthread_mutex_destroy(&rope->lock);
+		free(rope->tid); free(rope->w);
+		rope->tid = 0; rope->w = 0;
+	} else rope->done = 1;
+}
+
+/********************
+ *** Key routines ***
+ ********************/
 
 static node_t *rbm_leaf_init(rbmope6_t *rope)
 {
@@ -118,12 +181,23 @@ rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs)
 	rope->node = mp_init(sizeof(node_t));
 	rope->str  = mp_init(rope->max_runs);
 	rope->root = rbm_leaf_init(rope);
+	if (n_threads > 1) {
+		int i;
+		pthread_mutex_init(&rope->lock, 0);
+		pthread_cond_init(&rope->cv, 0);
+		rope->tid = calloc(n_threads, sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
+		rope->w = calloc(n_threads, sizeof(worker_t));
+		for (i = 0; i < n_threads; ++i)
+			rope->w[i].start = i, rope->w[i].step = n_threads, rope->w[i].rope = rope;
+		for (i = 1; i < n_threads; ++i) pthread_create(&rope->tid[i], 0, worker, &rope->w[i]);
+	}
 	return rope;
 }
 
 void rbm_destroy(rbmope6_t *rope)
 {
 	int i;
+	if (!rope->done) rbm_finalize(rope);
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
 	free(rope->buf); free(rope->len); free(rope->u);
 	mp_destroy(rope->node);
@@ -395,20 +469,6 @@ static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
 	modify_multi1(rope, i - last, &u[last]);
 }
 
-typedef struct {
-	int start, step, n;
-	const rbmope6_t *rope;
-} worker_t;
-
-static void *worker(void *data)
-{
-	worker_t *w = (worker_t*)data;
-	int i;
-	for (i = w->start; i < w->n; i += w->step)
-		probe(w->rope, &w->rope->u[i], w->rope->n_seqs);
-	return 0;
-}
-
 void rbm_update(rbmope6_t *rope)
 { // FIXME: *NOT* WORKING when input sequences are of different lengths!!!
 	int i, l, m, n;
@@ -423,15 +483,14 @@ void rbm_update(rbmope6_t *rope)
 		int64_t c[6];
 		// probe the insertion point and compute the pre-coordinate for the next insertion
 		if (rope->n_threads > 1) {
-			worker_t *w;
-			pthread_t *tid;
-			w = (worker_t*)calloc(rope->n_threads, sizeof(worker_t));
-			tid = (pthread_t*)calloc(rope->n_threads, sizeof(pthread_t));
+			pthread_mutex_lock(&rope->lock);
 			for (i = 0; i < rope->n_threads; ++i)
-				w[i].start = i, w[i].step = rope->n_threads, w[i].rope = rope, w[i].n = n;
-			for (i = 0; i < rope->n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
-			for (i = 0; i < rope->n_threads; ++i) pthread_join(tid[i], 0);
-			free(tid); free(w);
+				rope->w[i].toproc = 1, rope->w[i].n = n;
+			rope->proc_cnt = 0;
+			pthread_cond_broadcast(&rope->cv);
+			pthread_mutex_unlock(&rope->lock);
+			worker_aux(&rope->w[0]);
+			while (rope->proc_cnt < rope->n_threads);
 		} else for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs);
 		// perform insertion
 		modify_multi(rope, n, rope->u);

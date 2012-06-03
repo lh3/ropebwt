@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
 
 	if (rbm) {
 		rbmiter_t *iter;
-		rbm_update(rbm);
+		rbm_finalize(rbm);
 		iter = rbm_iter_init(rbm);
 		while ((s = rbm_iter_next(iter, &c)) != 0)
 			for (i = 0; i < c; ++i)

@@ -17,7 +17,7 @@ extern "C" {
 	void rbm_destroy(rbmope6_t *rope);
 	void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str);
 	void rbm_print(const rbmope6_t *rope);
-	void rbm_update(rbmope6_t *rope);
+	void rbm_finalize(rbmope6_t *rope);
 
 	rbmiter_t *rbm_iter_init(const rbmope6_t *rope); // to free, simply call free()
 	const uint8_t *rbm_iter_next(rbmiter_t *iter, int *n);
