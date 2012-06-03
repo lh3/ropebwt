@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <pthread.h>
 #include "ksort.h"
 #include "rbrope6-mt.h"
 
@@ -394,8 +395,22 @@ static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
 	modify_multi1(rope, i - last, &u[last]);
 }
 
-void rbm_update(rbmope6_t *rope)
+typedef struct {
+	int start, step, n;
+	const rbmope6_t *rope;
+} worker_t;
+
+static void *worker(void *data)
 {
+	worker_t *w = (worker_t*)data;
+	int i;
+	for (i = w->start; i < w->n; i += w->step)
+		probe(w->rope, &w->rope->u[i], w->rope->n_seqs);
+	return 0;
+}
+
+void rbm_update(rbmope6_t *rope)
+{ // FIXME: *NOT* WORKING when input sequences are of different lengths!!!
 	int i, l, m, n;
 	for (i = 0; i < rope->n_seqs; ++i) {
 		probe1_t *u = &rope->u[i];
@@ -407,7 +422,17 @@ void rbm_update(rbmope6_t *rope)
 	for (l = 1; n; ++l) {
 		int64_t c[6];
 		// probe the insertion point and compute the pre-coordinate for the next insertion
-		for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs); // FIXME: should we use rope->n_seqs or n, or should we insert $ after we finish all sequences?
+		if (rope->n_threads > 1) {
+			worker_t *w;
+			pthread_t *tid;
+			w = (worker_t*)calloc(rope->n_threads, sizeof(worker_t));
+			tid = (pthread_t*)calloc(rope->n_threads, sizeof(pthread_t));
+			for (i = 0; i < rope->n_threads; ++i)
+				w[i].start = i, w[i].step = rope->n_threads, w[i].rope = rope, w[i].n = n;
+			for (i = 0; i < rope->n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
+			for (i = 0; i < rope->n_threads; ++i) pthread_join(tid[i], 0);
+			free(tid); free(w);
+		} else for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs);
 		// perform insertion
 		modify_multi(rope, n, rope->u);
 		// compute the insertion coordinate in the new BWT
@@ -434,7 +459,7 @@ void rbm_update(rbmope6_t *rope)
 				if (m == i) ++m;
 				else rope->u[m++] = rope->u[i];
 			}
-		assert(m == 0 || m == n);
+		assert(m == 0 || m == n); // assertion failure if input are of different lengths
 		n = m;
 	}
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);

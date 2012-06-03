@@ -1,10 +1,10 @@
 CC=			gcc
-CFLAGS=		-g -Wall #-O2
+CFLAGS=		-g -Wall -O2
 DFLAGS=		
 OBJS=		bprope6.o rbrope6.o rbrope6-mt.o
 PROG=		ropebwt
 INCLUDES=	
-LIBS=		-lz
+LIBS=		-lpthread -lz
 
 .SUFFIXES:.c .o
 
