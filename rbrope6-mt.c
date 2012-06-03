@@ -111,7 +111,8 @@ struct rbmope6_s {
  *** Worker ***
  **************/
 
-static int probe(const rbmope6_t *rope, probe1_t *u, int m);
+static int probe_leaf(const node_t *p, int a, int x, uint32_t *pos);
+static int probe(const rbmope6_t *rope, probe1_t *u);
 void rbm_update(rbmope6_t *rope);
 
 static int worker_aux(worker_t *w)
@@ -124,8 +125,11 @@ static int worker_aux(worker_t *w)
 	w->toproc = 0;
 	pthread_mutex_unlock(&w->rope->lock);
 	if (stop) return 1; // to quit the thread
-	for (i = w->start; i < w->n; i += w->step)
-		probe(w->rope, &w->rope->u[i], w->rope->n_seqs);
+	for (i = w->start; i < w->n; i += w->step) {
+		probe1_t *u = &w->rope->u[i];
+		probe(w->rope, u);
+		u->z += probe_leaf(u->p, u->a, u->pos, &u->pos) + w->rope->n_seqs;
+	}
 	__sync_fetch_and_add(&w->rope->proc_cnt, 1);
 	return 0;
 }
@@ -381,7 +385,7 @@ static void rbm_print_node(const node_t *p)
 
 void rbm_print(const rbmope6_t *rope) { rbm_print_node(rope->root); putchar('\n'); }
 
-static int probe(const rbmope6_t *rope, probe1_t *u, int m)
+static int probe(const rbmope6_t *rope, probe1_t *u)
 {
 	const node_t *p;
 	int dir, c;
@@ -392,8 +396,7 @@ static int probe(const rbmope6_t *rope, probe1_t *u, int m)
 		if (x > l + y) dir = 1, y += l, u->z += p->x[0].p->c[u->a]>>1;
 		else dir = 0;
 	}
-	u->p = (node_t*)p;
-	u->z += probe_leaf(p, u->a, x - y, &u->pos) + m;
+	u->p = (node_t*)p; u->pos = x - y;
 	return 0;
 }
 
@@ -491,7 +494,13 @@ void rbm_update(rbmope6_t *rope)
 			pthread_mutex_unlock(&rope->lock);
 			worker_aux(&rope->w[0]);
 			while (rope->proc_cnt < rope->n_threads);
-		} else for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs);
+		} else {
+			for (i = 0; i < n; ++i) {
+				probe1_t *u = &rope->u[i];
+				probe(rope, u);
+				u->z += probe_leaf(u->p, u->a, u->pos, &u->pos) + rope->n_seqs;
+			}
+		}
 		// perform insertion
 		modify_multi(rope, n, rope->u);
 		// compute the insertion coordinate in the new BWT
