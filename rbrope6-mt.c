@@ -5,6 +5,8 @@
 #include "ksort.h"
 #include "rbrope6-mt.h"
 
+#define RBM_MT
+
 /***********************************
  *** Allocation-only memory pool ***
  ***********************************/
@@ -54,7 +56,7 @@ static inline void *mp_alloc(mempool_t *mp)
 
 #define MAX_HEIGHT 80
 #define MAX_RUNLEN 31
-#define MIN_RECODE 2
+#define MIN_RECODE 10
 
 typedef struct rbrnode_s {
 	union {
@@ -321,7 +323,7 @@ static int probe(const rbmope6_t *rope, probe1_t *u, int m)
 	u->z += probe_leaf(p, u->a, x - y, &u->pos) + m;
 	return 0;
 }
-
+#ifndef RBM_MT
 static void modify(rbmope6_t *rope, const probe1_t *u)
 {
 	node_t *p;
@@ -329,7 +331,7 @@ static void modify(rbmope6_t *rope, const probe1_t *u)
 	insert_at(u->p, u->a, u->pos);
 	fix(rope, u->p, 0);
 }
-
+#else
 typedef struct {
 	int last_l, last_c;
 	uint8_t *s;
@@ -401,7 +403,8 @@ static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
 	}
 	modify_multi1(rope, i - last, &u[last]);
 }
-
+#endif
+#ifndef RBM_MT
 // insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
 uint64_t rbm_insert_symbol(rbmope6_t *rope, int a, uint64_t x)
 {
@@ -426,8 +429,8 @@ void rbm_update(rbmope6_t *rope)
 	rope->n_seqs = 0;
 	fprintf(stderr, "Not here!\n");
 }
-
-void rbm_update_bcr(rbmope6_t *rope)
+#else
+void rbm_update(rbmope6_t *rope)
 {
 	int i, l, m, n;
 	for (i = 0; i < rope->n_seqs; ++i) {
@@ -474,7 +477,7 @@ void rbm_update_bcr(rbmope6_t *rope)
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
 	rope->n_seqs = 0;
 }
-
+#endif
 void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str)
 {
 	int i;
@@ -487,7 +490,7 @@ void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str)
 		s[l - 1 - i] = c;
 	}
 	rope->len[rope->n_seqs++] = l;
-	if (rope->n_seqs == rope->max_seqs) rbm_update_bcr(rope);
+	if (rope->n_seqs == rope->max_seqs) rbm_update(rope);
 }
 
 struct rbmiter_s {
