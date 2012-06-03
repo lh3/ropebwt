@@ -370,18 +370,21 @@ static void modify_multi1(rbmope6_t *rope, int n, probe1_t *u)
 		uint8_t *s, *t = p->x[1].s;
 		e.s = s = malloc(n + rope->max_runs + (n > rope->max_runs? n : rope->max_runs) * 2 + 2); // s will be freed by fix()
 		e.last_c = -1; e.last_l = 0;
-		for (i = j = 0; i < p->x[0].n; ++i) {
-			if (j < n && i == u[j].pos>>16) {
-				int l = 0;
-				do {
-					enc1(&e, (u[j].pos&0xffff) - l, t[i]&7);
-					enc1(&e, 1, u[j].a);
-					l = u[j++].pos&0xffff;
-				} while (j < n && u[j].pos>>16 == i);
-				enc1(&e, (p->x[1].s[i]>>3) - l, t[i]&7);
-			} else enc1(&e, t[i]>>3, t[i]&7);
-		}
+		if (p->x[0].n) {
+			for (i = j = 0; i < p->x[0].n; ++i) {
+				if (j < n && i == u[j].pos>>16) {
+					int l = 0;
+					do {
+						enc1(&e, (u[j].pos&0xffff) - l, t[i]&7);
+						enc1(&e, 1, u[j].a);
+						l = u[j++].pos&0xffff;
+					} while (j < n && u[j].pos>>16 == i);
+					enc1(&e, (p->x[1].s[i]>>3) - l, t[i]&7);
+				} else enc1(&e, t[i]>>3, t[i]&7);
+			}
+		} else for (j = 0; j < n; ++j) enc1(&e, 1, u[j].a);
 		enc1(&e, 0, -2);
+		p->x[0].n = e.s - s;
 		t = p->x[1].s; p->x[1].s = s;
 		fix(rope, p, t);
 	}
