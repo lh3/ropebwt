@@ -386,7 +386,7 @@ static void modify_multi1(rbmope6_t *rope, int n, probe1_t *u)
 static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
 {
 	node_t *p = 0;
-	int i, last;
+	int i, last = 0;
 	for (i = 0; i < n; ++i) {
 		if (u[i].p == p) continue;
 		if (i) modify_multi1(rope, i - last, &u[last]);
