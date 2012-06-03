@@ -5,8 +5,6 @@
 #include "ksort.h"
 #include "rbrope6-mt.h"
 
-#define RBM_MT
-
 /***********************************
  *** Allocation-only memory pool ***
  ***********************************/
@@ -323,15 +321,7 @@ static int probe(const rbmope6_t *rope, probe1_t *u, int m)
 	u->z += probe_leaf(p, u->a, x - y, &u->pos) + m;
 	return 0;
 }
-#ifndef RBM_MT
-static void modify(rbmope6_t *rope, const probe1_t *u)
-{
-	node_t *p;
-	for (p = u->p; p; p = p->parent) p->c[u->a] += 2;
-	insert_at(u->p, u->a, u->pos);
-	fix(rope, u->p, 0);
-}
-#else
+
 typedef struct {
 	int last_l, last_c;
 	uint8_t *s;
@@ -403,33 +393,7 @@ static void modify_multi(rbmope6_t *rope, int n, probe1_t *u)
 	}
 	modify_multi1(rope, i - last, &u[last]);
 }
-#endif
-#ifndef RBM_MT
-// insert $a after $x characters in $rope and return "|{$rope[i]<$a}| + |{$rope[i]==$a:0<=i<$x}| + 1"
-uint64_t rbm_insert_symbol(rbmope6_t *rope, int a, uint64_t x)
-{
-	probe1_t u;
-	u.a = a; u.z = x;
-	probe(rope, &u, 1);
-	modify(rope, &u);
-	return u.z;
-}
 
-void rbm_update(rbmope6_t *rope)
-{
-	int i;
-	for (i = 0; i < rope->n_seqs; ++i) {
-		int j, l = rope->len[i];
-		uint64_t x = rope->root->c[0]>>1;
-		for (j = 0; j < l; ++j)
-			x = rbm_insert_symbol(rope, rope->buf[i][j], x);
-		rbm_insert_symbol(rope, 0, x);
-	}
-	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
-	rope->n_seqs = 0;
-	fprintf(stderr, "Not here!\n");
-}
-#else
 void rbm_update(rbmope6_t *rope)
 {
 	int i, l, m, n;
@@ -445,9 +409,7 @@ void rbm_update(rbmope6_t *rope)
 		// probe the insertion point and compute the pre-coordinate for the next insertion
 		for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs); // FIXME: should we use rope->n_seqs or n, or should we insert $ after we finish all sequences?
 		// perform insertion
-//		printf("+++ "); rbm_print(rope);
 		modify_multi(rope, n, rope->u);
-//		printf("--- "); rbm_print(rope);
 		// compute the insertion coordinate in the new BWT
 		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
@@ -478,7 +440,7 @@ void rbm_update(rbmope6_t *rope)
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
 	rope->n_seqs = 0;
 }
-#endif
+
 void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str)
 {
 	int i;

@@ -15,9 +15,7 @@ extern "C" {
 
 	rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs);
 	void rbm_destroy(rbmope6_t *rope);
-	uint64_t rbm_insert_symbol(rbmope6_t *rope, int a, uint64_t x);
 	void rbm_insert_string(rbmope6_t *rope, int l, uint8_t *str);
-	void rbm_get_counts(rbmope6_t *rope, uint64_t c[6]);
 	void rbm_print(const rbmope6_t *rope);
 	void rbm_update(rbmope6_t *rope);
 
