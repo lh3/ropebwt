@@ -60,8 +60,8 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (n_threads > 1) rbm = rbm_init(n_threads, batch_size, max_runs);
-	else if (max_nodes <= 2) rbr = rbr_init(max_runs);
+	if (max_nodes <= 2 && batch_size > 1) rbm = rbm_init(n_threads, batch_size, max_runs);
+	else if (max_nodes <= 2 && batch_size <= 1) rbr = rbr_init(max_runs);
 	else bpr = bpr_init(max_nodes, max_runs);
 	fp = gzopen(argv[optind], "rb");
 	ks = kseq_init(fp);
