@@ -54,7 +54,7 @@ static inline void *mp_alloc(mempool_t *mp)
 
 #define MAX_HEIGHT 80
 #define MAX_RUNLEN 31
-#define MIN_RECODE 5
+#define MIN_RECODE 2
 
 typedef struct rbrnode_s {
 	union {
@@ -436,11 +436,11 @@ void rbm_update_bcr(rbmope6_t *rope)
 	n = rope->n_seqs;
 	for (l = 1; n; ++l) {
 		int64_t c[6];
-		// probe the insertion point and compute the position of the next insertion in the old coordinate
-		for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs); // FIXME: should we use rope->n_seqs or n, or should we insert $ in the end?
+		// probe the insertion point and compute the pre-coordinate for the next insertion
+		for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs); // FIXME: should we use rope->n_seqs or n, or should we insert $ after we finish all sequences?
 		// perform insertion
 		modify_multi(rope, n, rope->u);
-		// compute the new coordinate from the old coordinate
+		// compute the insertion coordinate in the new BWT
 		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
 			probe1_t *u = &rope->u[i];
@@ -450,7 +450,7 @@ void rbm_update_bcr(rbmope6_t *rope)
 		memmove(c + 1, c, 40);
 		for (i = 1, c[0] = 0; i < 6; ++i) c[i] += c[i - 1]; // c[] now keeps the accumulative counts
 		for (i = 0; i < n; ++i) rope->u[i].z += c[rope->u[i].a];
-		// sort by the new coordinate
+		// compute the insertion coordinate in the current BWT
 		ks_introsort(rbm, n, rope->u);
 		for (i = 0; i < n; ++i) rope->u[i].z -= i;
 		// get the base to insert
