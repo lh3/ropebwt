@@ -82,14 +82,14 @@ typedef struct {
 	uint64_t z:61, a:3;
 } probe1_t;
 
-#define probe_lt(a, b) ((a).z < (b).z || ((a).z == (b).z && (a).i < (b).i))
+#define probe_lt(a, b) ((a).z < (b).z)
 KSORT_INIT(rbm, probe1_t, probe_lt)
 
 struct rbmope6_s {
 	int max_runs, n_threads, max_seqs, n_seqs;
 	int *len;
 	uint8_t **buf;
-	probe1_t *state;
+	probe1_t *u;
 	mempool_t *node, *str;
 	node_t *root;
 };
@@ -112,7 +112,7 @@ rbmope6_t *rbm_init(int n_threads, int max_seqs, int max_runs)
 	rope->max_seqs = max_seqs;
 	rope->buf = malloc(sizeof(void*) * max_seqs);
 	rope->len = malloc(sizeof(int) * max_seqs);
-	rope->state = malloc(sizeof(probe1_t) * max_seqs);
+	rope->u = malloc(sizeof(probe1_t) * max_seqs);
 	rope->max_runs = (max_runs + 1)>>1<<1; // make it an even number
 	rope->node = mp_init(sizeof(node_t));
 	rope->str  = mp_init(rope->max_runs);
@@ -124,7 +124,7 @@ void rbm_destroy(rbmope6_t *rope)
 {
 	int i;
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
-	free(rope->buf); free(rope->len); free(rope->state);
+	free(rope->buf); free(rope->len); free(rope->u);
 	mp_destroy(rope->node);
 	mp_destroy(rope->str);
 	free(rope);
@@ -306,7 +306,7 @@ static void rbm_print_node(const node_t *p)
 
 void rbm_print(const rbmope6_t *rope) { rbm_print_node(rope->root); putchar('\n'); }
 
-static int probe(const rbmope6_t *rope, probe1_t *u)
+static int probe(const rbmope6_t *rope, probe1_t *u, int m)
 {
 	const node_t *p;
 	int dir, c;
@@ -318,7 +318,7 @@ static int probe(const rbmope6_t *rope, probe1_t *u)
 		else dir = 0;
 	}
 	u->p = (node_t*)p;
-	u->z += probe_leaf(p, u->a, x - y, &u->pos) + 1;
+	u->z += probe_leaf(p, u->a, x - y, &u->pos) + m;
 	return 0;
 }
 
@@ -404,7 +404,7 @@ uint64_t rbm_insert_symbol(rbmope6_t *rope, int a, uint64_t x)
 {
 	probe1_t u;
 	u.a = a; u.z = x;
-	probe(rope, &u);
+	probe(rope, &u, 1);
 	modify(rope, &u);
 	return u.z;
 }
@@ -428,7 +428,7 @@ void rbm_update_bcr(rbmope6_t *rope)
 {
 	int i, l, m, n;
 	for (i = 0; i < rope->n_seqs; ++i) {
-		probe1_t *u = &rope->state[i];
+		probe1_t *u = &rope->u[i];
 		u->i = i;
 		u->a = rope->buf[i][0];
 		u->z = rope->root->c[0]>>1;
@@ -436,31 +436,35 @@ void rbm_update_bcr(rbmope6_t *rope)
 	n = rope->n_seqs;
 	for (l = 1; n; ++l) {
 		int64_t c[6];
-		if (l > 1) ks_introsort(rbm, n, rope->state);
-		for (i = 0; i < n; ++i) probe(rope, &rope->state[i]);
-		modify_multi(rope, n, rope->state);
+		// probe the insertion point and compute the position of the next insertion in the old coordinate
+		for (i = 0; i < n; ++i) probe(rope, &rope->u[i], rope->n_seqs); // FIXME: should we use rope->n_seqs or n, or should we insert $ in the end?
+		// perform insertion
+		modify_multi(rope, n, rope->u);
+		// compute the new coordinate from the old coordinate
 		memset(c, 0, 48);
 		for (i = 0; i < n; ++i) {
-			probe1_t *u = &rope->state[i];
+			probe1_t *u = &rope->u[i];
 			u->z += c[u->a];
 			++c[u->a];
 		}
 		memmove(c + 1, c, 40);
 		for (i = 1, c[0] = 0; i < 6; ++i) c[i] += c[i - 1]; // c[] now keeps the accumulative counts
+		for (i = 0; i < n; ++i) rope->u[i].z += c[rope->u[i].a];
+		// sort by the new coordinate
+		ks_introsort(rbm, n, rope->u);
+		for (i = 0; i < n; ++i) rope->u[i].z -= i;
+		// get the base to insert
 		for (i = 0; i < n; ++i) {
-			probe1_t *u = &rope->state[i];
-			u->z += c[u->a];
+			probe1_t *u = &rope->u[i];
+			u->a = l < rope->len[u->i]? rope->buf[u->i][l] : l == rope->len[u->i]? 0 : 7;
 		}
-		for (i = m = 0; i < n; ++i) // exclude finished sequences
-			if (rope->state[i].a) {
+		// exclude finished sequences
+		for (i = m = 0; i < n; ++i)
+			if (rope->u[i].a != 7) {
 				if (m == i) ++m;
-				else rope->state[m++] = rope->state[i];
+				else rope->u[m++] = rope->u[i];
 			}
 		n = m;
-		for (i = 0; i < n; ++i) {
-			probe1_t *u = &rope->state[i];
-			u->a = l < rope->len[u->i]? rope->buf[u->i][l] : 0;
-		}
 	}
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
 	rope->n_seqs = 0;
