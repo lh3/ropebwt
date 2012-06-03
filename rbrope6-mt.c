@@ -472,6 +472,7 @@ void rbm_update(rbmope6_t *rope)
 				if (m == i) ++m;
 				else rope->u[m++] = rope->u[i];
 			}
+		assert(m == 0 || m == n);
 		n = m;
 	}
 	for (i = 0; i < rope->n_seqs; ++i) free(rope->buf[i]);
