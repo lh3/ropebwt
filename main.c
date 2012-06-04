@@ -46,6 +46,7 @@ int main(int argc, char *argv[])
 	gzFile fp;
 	kseq_t *ks;
 	int c, i, j, for_only = 0, print_rope = 0, max_runs = 512, max_nodes = 64, n_threads = 1, batch_size = 0x10000;
+	int64_t cnt = 0;
 	const uint8_t *s;
 
 	while ((c = getopt(argc, argv, "Tfr:n:t:b:")) >= 0)
@@ -67,17 +68,20 @@ int main(int argc, char *argv[])
 	ks = kseq_init(fp);
 	while (kseq_read(ks) >= 0) {
 		uint8_t *s = (uint8_t*)ks->seq.s;
+		++cnt;
 		seq_char2nt6(ks->seq.l, s);
 		if (rbm) rbm_insert_string(rbm, ks->seq.l, s);
 		if (rbr) rbr_insert_string(rbr, ks->seq.l, s);
 		if (bpr) bpr_insert_string(bpr, ks->seq.l, s);
 		if (!for_only) {
+			++cnt;
 			seq_revcomp6(ks->seq.l, s);
 			if (rbm) rbm_insert_string(rbm, ks->seq.l, s);
 			if (rbr) rbr_insert_string(rbr, ks->seq.l, s);
 			if (bpr) bpr_insert_string(bpr, ks->seq.l, s);
 		}
 	}
+	fprintf(stderr, "[M::%s] processed %ld sequences\n", __func__, (long)cnt);
 	kseq_destroy(ks);
 	gzclose(fp);
 

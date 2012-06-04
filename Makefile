@@ -1,5 +1,5 @@
 CC=			gcc
-CFLAGS=		-g -Wall -O2
+CFLAGS=		-g -Wall -O2 -fno-inline-functions -fno-inline-functions-called-once #-inline-level=1
 DFLAGS=		
 OBJS=		bprope6.o rbrope6.o rbrope6-mt.o
 PROG=		ropebwt
