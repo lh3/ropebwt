@@ -178,8 +178,8 @@ static void dump_rope(const char *prefix, int id, bprope6_t *rope)
 		fn = calloc(strlen(prefix) + 6, 1);
 		if (id >= 0) sprintf(fn, "%s.%.4d", prefix, id);
 		else strcpy(fn, prefix);
-		free(fn);
 		fp = fopen(fn, "wb");
+		free(fn);
 	} else fp = stdout;
 	itr = bpr_iter_init(rope);
 	fwrite("RL6\2", 1, 4, fp);

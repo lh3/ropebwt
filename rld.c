@@ -305,6 +305,8 @@ rld_t *rld_restore(const char *fn)
 		while ((l = fread(buf, 1, 0x10000, fp)) != 0)
 			for (i = 0; i < l; ++i)
 				if (buf[i]>>3) rld_enc(e, &itr, buf[i]>>3, buf[i]&7);
+		fclose(fp);
+		free(buf);
 		rld_enc_finish(e, &itr);
 		return e;
 	}
