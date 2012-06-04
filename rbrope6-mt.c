@@ -392,7 +392,7 @@ static int probe(const rbmope6_t *rope, probe1_t *u)
 	int64_t x = u->z, y;
 	for (c = 0, u->z = 0; c < u->a; ++c) u->z += rope->root->c[c]>>1;
 	for (p = rope->root, y = 0; !is_leaf(p); p = p->x[dir].p) {
-		int l = rbm_strlen(p->x[0].p);
+		int64_t l = rbm_strlen(p->x[0].p);
 		if (x > l + y) dir = 1, y += l, u->z += p->x[0].p->c[u->a]>>1;
 		else dir = 0;
 	}
