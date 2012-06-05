@@ -41,8 +41,6 @@ static void *worker(void *data)
 	k = x = w->start;
 	y = w->offset + w->shift * (w->start + 1) - 1;
 	i = w->shift? y : w->e0->mcnt[1] - 1;
-	assert(i >= 0 && i < w->e0->mcnt[1]);
-	assert(i + k + 1 < w->e0->mcnt[1] + w->e1->mcnt[1]);
 	w->buf[n++] = i + k + 1;
 	for (;;) {
 		int c = rld_rank1a(w->e1, k, ok);
@@ -51,8 +49,6 @@ static void *worker(void *data)
 			if (x >= w->e1->mcnt[1]) break;
 			k = x;
 			i = w->shift? y : w->e0->mcnt[1] - 1;
-			assert(i >= 0 && i < w->e0->mcnt[1]);
-			assert(i + k + 1 < w->e0->mcnt[1] + w->e1->mcnt[1]);
 		} else {
 			k = w->e1->cnt[c] + ok[c] - 1;
 			rld_rank1a(w->e0, i, ok);
