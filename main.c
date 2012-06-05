@@ -1,83 +1,84 @@
-#include <zlib.h>
 #include <stdio.h>
-#include <string.h>
 #include <unistd.h>
-#include "bprope6.h"
-#include "kseq.h"
-KSEQ_INIT(gzFile, gzread)
+#include <string.h>
+#include <stdint.h>
+#include "rld.h"
+#include "ropebwt.h"
 
-unsigned char seq_nt6_table[128] = {
-    0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
-};
-
-void seq_char2nt6(int l, unsigned char *s)
+#if defined(__APPLE__)
+#include <sys/types.h>
+#include <sys/sysctl.h>
+static int64_t get_max_mem()
 {
-	int i;
-	for (i = 0; i < l; ++i)
-		s[i] = s[i] < 128? seq_nt6_table[s[i]] : 5;
+	int64_t mem;
+	size_t len;
+	int mib[4];
+	mib[0] = CTL_HW; mib[1] = HW_MEMSIZE;
+	len = 8;
+	sysctl(mib, 2, &mem, &len, 0, 0);
+	return mem;
 }
-
-void seq_revcomp6(int l, unsigned char *s)
+#elif defined(__linux__)
+#include <sys/time.h>
+#include <sys/resource.h>
+int64_t get_max_mem()
 {
-	int i;
-	for (i = 0; i < l>>1; ++i) {
-		int tmp = s[l-1-i];
-		tmp = (tmp >= 1 && tmp <= 4)? 5 - tmp : tmp;
-		s[l-1-i] = (s[i] >= 1 && s[i] <= 4)? 5 - s[i] : s[i];
-		s[i] = tmp;
+	FILE *fp;
+	char buffer[64];
+	int64_t mem = INT64_MAX;
+	struct rlimit r;
+	if ((fp = fopen("/proc/meminfo", "r")) != NULL) {
+		while (fscanf(fp, "%s", buffer) > 0) {
+			if (strstr(buffer, "MemTotal") == buffer) {
+				long tmp;
+				fscanf(fp, "%lu", &tmp);
+				mem = 1024LL * tmp;
+			}
+		}
+		fclose(fp);
 	}
-	if (l&1) s[i] = (s[i] >= 1 && s[i] <= 4)? 5 - s[i] : s[i];
+	getrlimit(RLIMIT_AS, &r);
+	r.rlim_cur = r.rlim_max;
+	setrlimit(RLIMIT_AS, &r);
+	if (mem > r.rlim_max) mem = r.rlim_max;
+	return mem;
 }
+#endif
 
 int main(int argc, char *argv[])
 {
-	bprope6_t *bpr = 0;
-	gzFile fp;
-	kseq_t *ks;
-	int c, i, j, for_only = 0, print_rope = 0, max_runs = 512, max_nodes = 64;
-	const uint8_t *s;
-	bpriter_t *iter;
-
-	while ((c = getopt(argc, argv, "Tfr:n:")) >= 0)
-		if (c == 'f') for_only = 1;
-		else if (c == 'T') print_rope = 1;
-		else if (c == 'r') max_runs = atoi(optarg);
-		else if (c == 'n') max_nodes= atoi(optarg);
-	if (optind == argc) {
-		fprintf(stderr, "Usage: ropebwt [-fT] [-r maxRuns=%d] [-n maxNodes=%d] <in.fq.gz>\n", max_runs, max_nodes);
+	int c, n_threads = 1, is_stdout = 0, flag = RB_F_FOR | RB_F_REV | RB_F_ODD;
+	int64_t max_mem = INT64_MAX;
+	rld_t *e;
+#if defined(__linux) || defined(__APPLE__)
+	max_mem = get_max_mem();
+#endif
+	while ((c = getopt(argc, argv, "FROot:m:")) >= 0)
+		if (c == 'F') flag &= ~RB_F_FOR;
+		else if (c == 'R') flag &= ~RB_F_REV;
+		else if (c == 'O') flag &= ~RB_F_ODD;
+		else if (c == 't') n_threads = atoi(optarg);
+		else if (c == 'm') {
+			char *p = optarg;
+			max_mem = strtol(p, &p, 10);
+			if (*p == 'k' || *p == 'K') max_mem <<= 10;
+			else if (*p == 'm' || *p == 'M') max_mem <<= 20;
+			else if (*p == 'g' || *p == 'G') max_mem <<= 30;
+		} else if (c == 'o') is_stdout = 1;
+	if (optind + 2 > argc) {
+		fprintf(stderr, "Usage: ropebwt [-FROo] [-t nThreads=1] [-m maxMem] <in.fq.gz> <out.fmd>\n");
 		return 1;
 	}
-
-	bpr = bpr_init(max_nodes, max_runs);
-	fp = gzopen(argv[optind], "rb");
-	ks = kseq_init(fp);
-	while (kseq_read(ks) >= 0) {
-		uint8_t *s = (uint8_t*)ks->seq.s;
-		seq_char2nt6(ks->seq.l, s);
-		bpr_insert_string(bpr, ks->seq.l, s);
-		if (!for_only) {
-			seq_revcomp6(ks->seq.l, s);
-			bpr_insert_string(bpr, ks->seq.l, s);
-		}
+	fprintf(stderr, "[M::%s] Maximum memory is set as %ld\n", __func__, (long)max_mem);
+	if ((e = rld_build(argv[optind], n_threads, flag, max_mem, argv[optind+1])) != 0) {
+		if (!is_stdout) {
+			char *fn;
+			fn = calloc(strlen(argv[optind+1]) + 5, 1);
+			sprintf(fn, "%s.fmd", argv[optind+1]);
+			rld_dump(e, fn);
+			free(fn);
+		} else rld_dump(e, "-");
+		rld_destroy(e);
 	}
-	kseq_destroy(ks);
-	gzclose(fp);
-
-	iter = bpr_iter_init(bpr);
-	while ((s = bpr_iter_next(iter, &c)) != 0)
-		for (i = 0; i < c; ++i)
-			for (j = 0; j < s[i]>>3; ++j)
-				putchar("$ACGTN"[s[i]&7]);
-	putchar('\n');
-	if (print_rope) bpr_print(bpr);
-	free(iter);
-	bpr_destroy(bpr);
 	return 0;
 }

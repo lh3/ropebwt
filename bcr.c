@@ -62,7 +62,7 @@ typedef struct {
 	uint64_t u, v; // $u: position; $v: seq_id:61, base:3
 } pair64_t;
 
-#define bcr_lt(a, b) ((a).u < (b).u || ((a).u == (b).u && (a).v < (b).v))
+#define bcr_lt(a, b) ((a).u < (b).u)
 KSORT_INIT(bcr, pair64_t, bcr_lt)
 
 typedef struct {

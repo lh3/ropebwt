@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include "bprope6.h"
 
-#define MP_CHUNK_SIZE 0x800000 // 8MB per chunk
+#define MP_CHUNK_SIZE 0x100000 // 1MB per chunk
 
 typedef struct { // memory pool for fast and compact memory allocation (no free)
 	int size, i, n_elems;
@@ -244,6 +244,12 @@ void bpr_destroy(bprope6_t *rope)
 	mp_destroy(rope->node);
 	mp_destroy(rope->leaf);
 	free(rope);
+}
+
+int64_t bpr_mem(bprope6_t *rope)
+{
+	return (rope->leaf->top + rope->node->top + 2) * MP_CHUNK_SIZE + (rope->leaf->max + rope->node->max) * sizeof(void*)
+		+ sizeof(mempool_t) * 2 + sizeof(bprope6_t) + 10 * sizeof(void*);
 }
 
 struct bpriter_s {
