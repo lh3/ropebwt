@@ -159,6 +159,7 @@ static unsigned char nt6_table[128] = {
 
 typedef struct {
 	int i, n_threads;
+	int64_t mem;
 	FILE *fpr;
 	const char *prefix;
 } worker1_t;
@@ -189,10 +190,17 @@ static void *worker1(void *data)
 {
 	worker1_t *w = (worker1_t*)data;
 	bprope6_t *rope;
-	int len, max_len = 0;
+	int len, max_len = 0, n_batches = 0;
 	uint8_t *s = 0;
 	rope = bpr_init(64, 512);
 	while (fread(&len, sizeof(int), 1, w->fpr) == 1) {
+		if (len == -1) {
+			dump_rope(w->prefix, n_batches * w->n_threads + w->i, rope);
+			rope = bpr_init(64, 512);
+			++n_batches;
+			w->mem = 0;
+			continue;
+		}
 		if (len > max_len) {
 			max_len = len;
 			kroundup32(max_len);
@@ -200,10 +208,11 @@ static void *worker1(void *data)
 		}
 		fread(s, 1, len, w->fpr);
 		bpr_insert_string(rope, len, s);
+		w->mem = bpr_mem(rope);
 	}
 	free(s);
 	fclose(w->fpr);
-	dump_rope(w->prefix, w->i, rope);
+	dump_rope(w->prefix, n_batches * w->n_threads + w->i, rope);
 	return 0;
 }
 
@@ -212,7 +221,7 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 	gzFile fp;
 	FILE **fpw;
 	kseq_t *ks;
-	int i, which = 0;
+	int i, which = 0, n_batches = 0;
 	pthread_t *tid;
 	worker1_t *w;
 	rld_t *e;
@@ -228,6 +237,7 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 		w[i].fpr = fdopen(fd[0], "rb");
 		w[i].prefix = prefix;
 		w[i].i = i;
+		w[i].n_threads = n_threads;
 	}
 	for (i = 0; i < n_threads; ++i) pthread_create(&tid[i], 0, worker1, &w[i]);
 
@@ -236,6 +246,7 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 	while (kseq_read(ks) >= 0) {
 		int l = ks->seq.l;
 		uint8_t *s = (uint8_t*)ks->seq.s;
+		int64_t mem;
 		// compute encoded string
 		for (i = 0; i < l; ++i)
 			s[i] = s[i] < 128? nt6_table[s[i]] : 5;
@@ -262,7 +273,16 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 			fwrite(s, 1, l, fpw[which]);
 			if (++which == n_threads) which = 0;
 		}
+		if (which == 0 && n_batches == 0) {
+			for (i = 0, mem = 0; i < n_threads; ++i) mem += w[i].mem;
+			if (mem >= max_mem) {
+				l = -1;
+				for (i = 0; i < n_threads; ++i) fwrite(&l, sizeof(int), 1, fpw[i]);
+				++n_batches;
+			}
+		}
 	}
+	++n_batches;
 	kseq_destroy(ks);
 	gzclose(fp);
 
@@ -277,16 +297,22 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 	else return 0;
 	if (n_threads > 1) {
 		rld_t *e1, *e0;
-		for (i = 1; i < n_threads; ++i) {
-			sprintf(tmpfn, "%s.%.4d", prefix, i);
-			e0 = e;
-			e1 = rld_restore(tmpfn);
-			if (!(e = rld_merge2(e0, e1, n_threads, 0, i))) {
-				sprintf(tmpfn, "%s.%.4d", prefix, i - 1);
-				rld_dump(e0, tmpfn);
-				free(tmpfn);
-				return 0;
-			} else unlink(tmpfn);
+		int64_t offset = 0;
+		int j;
+		for (j = 0; j < n_batches; ++j) {
+			if (j > 0) offset = e->mcnt[1];
+			for (i = 0; i < n_threads; ++i) {
+				if (j == 0 && i == 0) continue;
+				sprintf(tmpfn, "%s.%.4d", prefix, j * n_threads + i);
+				e0 = e;
+				e1 = rld_restore(tmpfn);
+				if (!(e = rld_merge2(e0, e1, n_threads, offset, i))) {
+					sprintf(tmpfn, "%s.%.4d", prefix, j * n_threads + i - 1);
+					rld_dump(e0, tmpfn);
+					free(tmpfn);
+					return 0;
+				} else unlink(tmpfn);
+			}
 		}
 	}
 	free(tmpfn);
@@ -296,18 +322,25 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 int main(int argc, char *argv[])
 {
 	int c, n_threads = 1, is_stdout = 0, flag = RB_F_FOR | RB_F_REV | RB_F_ODD;
+	int64_t max_mem = INT64_MAX;
 	rld_t *e;
-	while ((c = getopt(argc, argv, "FROot:")) >= 0)
+	while ((c = getopt(argc, argv, "FROot:m:")) >= 0)
 		if (c == 'F') flag &= ~RB_F_FOR;
 		else if (c == 'R') flag &= ~RB_F_REV;
 		else if (c == 'O') flag &= ~RB_F_ODD;
 		else if (c == 't') n_threads = atoi(optarg);
-		else if (c == 'o') is_stdout = 1;
+		else if (c == 'm') {
+			char *p = optarg;
+			max_mem = strtol(p, &p, 10);
+			if (*p == 'k' || *p == 'K') max_mem <<= 10;
+			else if (*p == 'm' || *p == 'M') max_mem <<= 20;
+			else if (*p == 'g' || *p == 'G') max_mem <<= 30;
+		} else if (c == 'o') is_stdout = 1;
 	if (optind + 2 > argc) {
-		fprintf(stderr, "Usage: ropebwt [-FROo] <in.fq.gz> <out.fmd>\n");
+		fprintf(stderr, "Usage: ropebwt [-FROo] [-t nThreads=1] [-m maxMem] <in.fq.gz> <out.fmd>\n");
 		return 1;
 	}
-	if ((e = rld_build(argv[optind], n_threads, flag, 0, argv[optind+1])) != 0) {
+	if ((e = rld_build(argv[optind], n_threads, flag, max_mem, argv[optind+1])) != 0) {
 		if (!is_stdout) {
 			char *fn;
 			fn = calloc(strlen(argv[optind+1]) + 5, 1);

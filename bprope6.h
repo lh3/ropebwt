@@ -52,6 +52,8 @@ extern "C" {
 	bpriter_t *bpr_iter_init(const bprope6_t *rope); // to free, simply call free()
 	// get the next leaf; $n is set to the number of runs in the leaf
 	const uint8_t *bpr_iter_next(bpriter_t *iter, int *n);
+	// memory used by the rope
+	int64_t bpr_mem(bprope6_t *rope);
 
 #ifdef __cplusplus
 }
