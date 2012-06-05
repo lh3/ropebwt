@@ -129,7 +129,6 @@ rld_t *rld_merge2(rld_t *e0, rld_t *e1, int n_threads, int64_t offset, int64_t s
 	return e;
 }
 
-rld_t *rld_merge(rld_t *e0, rld_t *e1, int n_threads) { return rld_merge2(e0, e1, n_threads, 0, 0); }
 
 /***********************
  *** Build sub-index ***
@@ -221,7 +220,7 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 	gzFile fp;
 	FILE **fpw;
 	kseq_t *ks;
-	int i, which = 0, n_batches = 0;
+	int i, j, which = 0, n_batches = 0;
 	pthread_t *tid;
 	worker1_t *w;
 	rld_t *e;
@@ -295,10 +294,9 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 	sprintf(tmpfn, "%s.%.4d", prefix, 0);
 	if ((e = rld_restore(tmpfn)) != 0) unlink(tmpfn);
 	else return 0;
-	if (n_threads > 1) {
+	if (n_threads > 1) { // merge FM-index
 		rld_t *e1, *e0;
 		int64_t offset = 0;
-		int j;
 		for (j = 0; j < n_batches; ++j) {
 			if (j > 0) offset = e->mcnt[1];
 			for (i = 0; i < n_threads; ++i) {
@@ -317,38 +315,4 @@ rld_t *rld_build(const char *fn, int n_threads, int flag, long max_mem, const ch
 	}
 	free(tmpfn);
 	return e;
-}
-
-int main(int argc, char *argv[])
-{
-	int c, n_threads = 1, is_stdout = 0, flag = RB_F_FOR | RB_F_REV | RB_F_ODD;
-	int64_t max_mem = INT64_MAX;
-	rld_t *e;
-	while ((c = getopt(argc, argv, "FROot:m:")) >= 0)
-		if (c == 'F') flag &= ~RB_F_FOR;
-		else if (c == 'R') flag &= ~RB_F_REV;
-		else if (c == 'O') flag &= ~RB_F_ODD;
-		else if (c == 't') n_threads = atoi(optarg);
-		else if (c == 'm') {
-			char *p = optarg;
-			max_mem = strtol(p, &p, 10);
-			if (*p == 'k' || *p == 'K') max_mem <<= 10;
-			else if (*p == 'm' || *p == 'M') max_mem <<= 20;
-			else if (*p == 'g' || *p == 'G') max_mem <<= 30;
-		} else if (c == 'o') is_stdout = 1;
-	if (optind + 2 > argc) {
-		fprintf(stderr, "Usage: ropebwt [-FROo] [-t nThreads=1] [-m maxMem] <in.fq.gz> <out.fmd>\n");
-		return 1;
-	}
-	if ((e = rld_build(argv[optind], n_threads, flag, max_mem, argv[optind+1])) != 0) {
-		if (!is_stdout) {
-			char *fn;
-			fn = calloc(strlen(argv[optind+1]) + 5, 1);
-			sprintf(fn, "%s.fmd", argv[optind+1]);
-			rld_dump(e, fn);
-			free(fn);
-		} else rld_dump(e, "-");
-		rld_destroy(e);
-	}
-	return 0;
 }
