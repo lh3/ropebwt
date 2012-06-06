@@ -10,7 +10,7 @@
  *** Data structure for long 2-bit encoded DNA ***
  *************************************************/
 
-#define LD_SHIFT 25
+#define LD_SHIFT 20
 #define LD_MASK  ((1U<<LD_SHIFT) - 1)
 
 #ifndef kroundup32
@@ -45,13 +45,13 @@ inline void ld_set(longdna_t *h, int64_t x, int c)
 		for (j = old_max; j < h->max; ++j) h->a[j] = 0;
 	}
 	if (h->a[k] == 0) h->a[k] = calloc(1<<LD_SHIFT>>5, 8);
-	h->a[k][l>>5] |= (c&3)<<(l&31); // NB: we cannot set the same position multiple times
+	h->a[k][l>>5] |= (uint64_t)(c&3)<<((l&31)<<1); // NB: we cannot set the same position multiple times
 }
 
 inline int ld_get(longdna_t *h, int64_t x)
 {
-	int k = x >> LD_SHIFT, l = x & LD_MASK;
-	return h->a[k][l>>5]>>(l&31)&3;
+	int l = x & LD_MASK;
+	return h->a[x>>LD_SHIFT][l>>5]>>((l&31)<<1)&3;
 }
 
 /***********
@@ -66,22 +66,26 @@ typedef struct {
 KSORT_INIT(bcr, pair64_t, bcr_lt)
 
 typedef struct {
-	int max_len, n_threads;
-	uint64_t n_seqs, m_seqs;
+	rld_t *e;
+	int64_t n, c[6];
+	pair64_t *a;
+} pbwt_t;
+
+typedef struct {
+	int max_len;
+	uint64_t n_seqs, m_seqs, c[6], c0[6][6];
 	uint8_t *len;
 	longdna_t **seq;
 	pair64_t *a;
-	rlditr_t itr;
-	rld_t *e;
+	pbwt_t bwt[6];
 } bcr_t;
 
-bcr_t *bcr_init(int n_threads)
+bcr_t *bcr_init()
 {
 	bcr_t *b;
+	int i;
 	b = calloc(1, sizeof(bcr_t));
-	b->n_threads = n_threads > 0? n_threads : 1;
-	b->e = rld_init(6, 3);
-	rld_itr_init(b->e, &b->itr, 0);
+	for (i = 0; i < 6; ++i) b->bwt[i].e = rld_init(6, 6);
 	return b;
 }
 
@@ -96,105 +100,142 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	int i;
 	assert(len < 256 && len > 1);
 	if (len > b->max_len) { // find a longer read
-		b->seq = realloc(b->seq, (len - 1) * sizeof(void*));
-		for (i = b->max_len; i < len - 1; ++i)
+		b->seq = realloc(b->seq, len * sizeof(void*));
+		for (i = b->max_len; i < len; ++i)
 			b->seq[i] = ld_init();
 		b->max_len = len;
 	}
 	if (b->n_seqs == b->m_seqs) {
 		b->m_seqs = b->m_seqs? b->m_seqs<<1 : 256;
-		b->len = realloc(b->len, 1);
+		b->len = realloc(b->len, b->m_seqs);
 	}
 	b->len[b->n_seqs] = len;
-	rld_enc(b->e, &b->itr, 1, seq[len - 1]);
-	for (i = 0; i < len - 2; ++i)
-		ld_set(b->seq[i], b->n_seqs, seq[len - 2 - i] - 1);
+	for (i = 0; i < len; ++i)
+		ld_set(b->seq[i], b->n_seqs, seq[len - 1 - i] - 1);
 	++b->n_seqs;
 }
 
-void bcr_prepare(bcr_t *b)
+static void print_bwt(rld_t *e, int endl)
+{
+	int64_t l, i;
+	int c;
+	rlditr_t itr;
+	if (e->mcnt[0]) {
+		rld_itr_init(e, &itr, 0);
+		while ((l = rld_dec(e, &itr, &c, 0)) != -1)
+			for (i = 0; i < l; ++i)
+				fputc("$ACGTN"[c], stderr);
+	}
+	if (endl) fputc(endl, stderr);
+}
+
+static void set_bwt(bcr_t *bcr)
+{
+	int64_t k, c[6], i[6];
+	int j, l;
+	pair64_t *a;
+	memset(c, 0, 48);
+	for (k = 0; k < bcr->n_seqs; ++k) {
+		pair64_t *u = &bcr->a[k];
+		u->u += c[u->v&7];
+		++c[u->v&7];
+	}
+	for (j = 0; j < 6; ++j) bcr->bwt[j].n = c[j];
+	for (l = 0; l < 6; ++l) bcr->bwt[0].c[l] = 0;
+	for (j = 1; j < 6; ++j)
+		for (l = 0; l < 6; ++l)
+			bcr->bwt[j].c[l] = bcr->bwt[j-1].e->mcnt[l+1];
+	for (j = 1; j < 6; ++j)
+		for (l = 0; l < 6; ++l)
+			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
+	memmove(c + 1, c, 40);
+	for (k = 1, c[0] = 0; k < 6; ++k) c[k] += c[k - 1];
+	a = malloc(bcr->n_seqs * 16);
+	for (k = 0; k < 6; ++k) i[k] = c[k], bcr->c[k] += c[k], bcr->bwt[k].a = a + c[k];
+	for (k = 0; k < bcr->n_seqs; ++k) {
+		pair64_t *u = &bcr->a[k];
+		int b = bcr->a[k].v&7;
+		bcr->a[k].u += c[b];
+		a[i[b]++] = bcr->a[k];
+		fprintf(stderr, "[1] k=%lld, u=%lld, i=%lld, c=%c\n", k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
+	}
+	free(bcr->a);
+	bcr->a = a;
+}
+
+static void next_bwt(bcr_t *bcr, int class, int pos)
+{
+	int64_t c[6], k, l;
+	rlditr_t ir, iw;
+	pbwt_t *bwt = &bcr->bwt[class];
+	rld_t *ew, *er = bwt->e;
+
+	if (bwt->n == 0) return;
+	if (class) ks_introsort(bcr, bwt->n, bwt->a);
+	for (l = 0; l < 6; ++l) fprintf(stderr, "%lld, ", bwt->c[l]); fputc('\n', stderr);
+	for (k = 0; k < bwt->n; ++k) {
+		pair64_t *u = &bwt->a[k];
+		u->u -= k + bcr->c[class];
+		u->v = (u->v&~7ULL) | (pos == bcr->max_len? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
+		fprintf(stderr, "[2] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
+	}
+	ew = rld_init(6, 6);
+	rld_itr_init(er, &ir, 0);
+	rld_itr_init(ew, &iw, 0);
+	memset(c, 0, 48);
+	for (k = l = 0; k < bwt->n; ++k) {
+		pair64_t *u = &bwt->a[k];
+		if (u->u > l)
+			l += rld_dec_enc_cnt(ew, &iw, er, &ir, u->u - l, c);
+		rld_enc(ew, &iw, 1, u->v&7);
+		u->u = c[u->v&7] + bcr->c[u->v&7] + bwt->c[u->v&7];
+	}
+	if (l < er->mcnt[0])
+		l += rld_dec_enc_cnt(ew, &iw, er, &ir, er->mcnt[0] - l, c);
+	rld_enc_finish_partial(ew, &iw);
+//	rld_enc_finish(ew, &iw);
+	rld_destroy(er);
+	bwt->e = ew;
+	for (k = 0; k < bwt->n; ++k) {
+		pair64_t *u = &bwt->a[k];
+		fprintf(stderr, "[3] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c, bcr->c=%lld, bwt->c=%lld\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7], bcr->c[u->v&7], bwt->c[u->v&7]);
+	}
+}
+
+rld_t *bcr_build(bcr_t *b)
 {
 	int64_t k;
+	int pos, c;
+	rld_t *e;
+	rlditr_t iw;
+
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs);
-	rld_enc_finish(b->e, &b->itr);
 	b->a = malloc(b->n_seqs * 16);
 	assert(b->a);
-	for (k = 0; k < b->n_seqs; ++k)
-		b->a[k].u = k, b->a[k].v = k<<3;
-}
-
-typedef struct {
-	bcr_t *b;
-	int start, step, i;
-} worker_t;
-
-static void *worker(void *data)
-{
-	worker_t *w = (worker_t*)data;
-	int64_t i, ok[6];
-	for (i = w->start; i < w->b->n_seqs; i += w->step) {
-		pair64_t *p = &w->b->a[i];
-		if (w->i < w->b->max_len - 1 && w->i > w->b->len[i] - 1) continue; // FIXME: check if this works for variable-length strings
-		rld_rank1a(w->b->e, p->u, (uint64_t*)ok);
-		p->u = w->b->e->cnt[p->v&7] + ok[p->v&7] - 1;
+	for (k = 0; k < b->n_seqs; ++k) b->a[k].u = 0, b->a[k].v = k<<3;
+	for (pos = 0; pos <= b->max_len; ++pos) {
+		set_bwt(b);
+		if (pos) {
+			for (c = 1; c <= 4; ++c)
+				next_bwt(b, c, pos);
+		} else next_bwt(b, 0, pos);
+		for (c = 0; c < 5; ++c) print_bwt(b->bwt[c].e, ','); fputc('\n', stderr);
 	}
-	return data;
-}
 
-void bcr_build1(bcr_t *b, int which)
-{
-	rld_t *e0;
-	rlditr_t itr0;
-	int64_t i, last;
-	int j;
-	pthread_t *tid;
-	pthread_attr_t attr;
-	worker_t *w;
-
-	// set b->a[].v
-	if (which < b->max_len - 1) {
-		for (i = 0; i < b->n_seqs; ++i)
-			b->a[i].v = (b->a[i].v & ~7ULL) | (ld_get(b->seq[which], b->a[i].v>>3) + 1);
-		ld_destroy(b->seq[which]);
-	} else for (i = 0; i < b->n_seqs; ++i) b->a[i].v &= ~7ULL;
-
-	// dispatch workers
-	pthread_attr_init(&attr);
-	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-	w = (worker_t*)calloc(b->n_threads, sizeof(worker_t));
-	tid = (pthread_t*)calloc(b->n_threads, sizeof(pthread_t));
-	for (j = 0; j < b->n_threads; ++j)
-		w[j].b = b, w[j].start = j, w[j].step = b->n_threads, w[j].i = which;
-	for (j = 0; j < b->n_threads; ++j) pthread_create(&tid[j], &attr, worker, w + j);
-	for (j = 0; j < b->n_threads; ++j) pthread_join(tid[j], 0);
-	free(w); free(tid);
-
-	// insert to the current BWT; similar to fm_merge_from_SA() in fermi
-	e0 = b->e;
-	b->e = rld_init(6, 3);
-	rld_itr_init(e0, &itr0, 0);
-	rld_itr_init(b->e, &b->itr, 0);
-	ks_introsort(bcr, b->n_seqs, b->a);
-	for (i = last = 0; i < b->n_seqs; ++i) {
-		pair64_t *p = &b->a[i];
-		if (p->u != last) {
-			rld_dec_enc(b->e, &b->itr, e0, &itr0, p->u - last);
-			last = p->u;
-		}
-		rld_enc(b->e, &b->itr, 1, p->v&7);
-		p->u += i;
+	e = rld_init(6, 3);
+	rld_itr_init(e, &iw, 0);
+	for (c = 0; c <= 4; ++c) {
+		rld_t *er = b->bwt[c].e;
+		rlditr_t ir;
+		if (er->mcnt[0] == 0) continue;
+		rld_itr_init(er, &ir, 0);
+		rld_dec_enc(e, &iw, er, &ir, er->mcnt[0]);
+		rld_destroy(er);
+		b->bwt[c].e = 0;
 	}
-	if (last != e0->mcnt[0] - 1)
-		rld_dec_enc(b->e, &b->itr, e0, &itr0, e0->mcnt[0] - 1 - last);
-	rld_destroy(e0);
-	rld_enc_finish(b->e, &b->itr);
-}
-
-void bcr_build(bcr_t *b)
-{
-	int j;
-	for (j = 0; j < b->max_len; ++j) bcr_build1(b, j);
+	rld_enc_finish(e, &iw);
+	return e;
 }
 
 /*********************
@@ -244,6 +285,7 @@ int main(int argc, char *argv[])
 	kseq_t *ks;
 	int c, for_only = 0, n_threads = 1;
 	bcr_t *bcr;
+	rld_t *e;
 
 	while ((c = getopt(argc, argv, "ft:")) >= 0)
 		if (c == 'f') for_only = 1;
@@ -253,7 +295,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	bcr = bcr_init(n_threads);
+	bcr = bcr_init();
 	fp = gzopen(argv[optind], "rb");
 	ks = kseq_init(fp);
 	while (kseq_read(ks) >= 0) {
@@ -268,8 +310,8 @@ int main(int argc, char *argv[])
 	kseq_destroy(ks);
 	gzclose(fp);
 
-	bcr_build(bcr);
-	rld_dump(bcr->e, "-");
+	e = bcr_build(bcr);
+	rld_dump(e, "-");
 	bcr_destroy(bcr);
 	return 0;
 }
