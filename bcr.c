@@ -10,32 +10,32 @@
  *** Lightweight run-length encoder/decoder ***
  **********************************************/
 
-#define RLD_LSIZE 0x100000
+#define RLL_BLOCK_SIZE 0x100000
 
 typedef struct {
 	int c;
 	int64_t l;
 	uint8_t *q, **i;
-} rlditr_t;
+} rllitr_t;
 
 typedef struct {
 	int n;
 	uint8_t **z;
 	int64_t l, mc[6];
-} rld_t;
+} rll_t;
 
-static rld_t *rld_init(void)
+static rll_t *rll_init(void)
 {
-	rld_t *e;
-	e = calloc(1, sizeof(rld_t));
+	rll_t *e;
+	e = calloc(1, sizeof(rll_t));
 	e->n = 1;
 	e->z = malloc(sizeof(void*));
-	e->z[0] = calloc(RLD_LSIZE, 1);
+	e->z[0] = calloc(RLL_BLOCK_SIZE, 1);
 	e->z[0][0] = 7;
 	return e;
 }
 
-static void rld_destroy(rld_t *e)
+static void rll_destroy(rll_t *e)
 {
 	int i;
 	if (e == 0) return;
@@ -43,49 +43,49 @@ static void rld_destroy(rld_t *e)
 	free(e->z); free(e);
 }
 
-static void rld_itr_init(const rld_t *e, rlditr_t *itr)
+static void rll_itr_init(const rll_t *e, rllitr_t *itr)
 {
 	itr->i = e->z; itr->q = *itr->i; itr->c = -1; itr->l = 0;
 }
 
-static inline void rld_enc0(rld_t *e, rlditr_t *itr, int l, uint8_t c)
+static inline void rll_enc0(rll_t *e, rllitr_t *itr, int l, uint8_t c)
 {
 	*itr->q++ = l<<3 | c;
 	e->mc[c] += l;
-	if (itr->q - *itr->i == RLD_LSIZE) {
+	if (itr->q - *itr->i == RLL_BLOCK_SIZE) {
 		++e->n;
 		e->z = realloc(e->z, e->n * sizeof(void*));
 		itr->i = e->z + e->n - 1;
-		itr->q = *itr->i = calloc(RLD_LSIZE, 1);
+		itr->q = *itr->i = calloc(RLL_BLOCK_SIZE, 1);
 	}
 }
 
-static void rld_enc(rld_t *e, rlditr_t *itr, int64_t l, uint8_t c)
+static void rll_enc(rll_t *e, rllitr_t *itr, int64_t l, uint8_t c)
 {
 	if (itr->c != c) {
 		if (itr->l) {
 			for (; itr->l > 31; itr->l -= 31)
-				rld_enc0(e, itr, 31, itr->c);
-			rld_enc0(e, itr, itr->l, itr->c);
+				rll_enc0(e, itr, 31, itr->c);
+			rll_enc0(e, itr, itr->l, itr->c);
 		}
 		itr->l = l; itr->c = c;
 	} else itr->l += l;
 }
 
-static void rld_enc_finalize(rld_t *e, rlditr_t *itr)
+static void rll_enc_finalize(rll_t *e, rllitr_t *itr)
 {
 	int c;
-	rld_enc0(e, itr, itr->l, itr->c);
+	rll_enc0(e, itr, itr->l, itr->c);
 	*itr->q = 7; // end marker; there is always room for an extra symbol
 	for (e->l = 0, c = 0; c < 6; ++c) e->l += e->mc[c];
 }
 
-static inline int64_t rld_dec(const rld_t *e, rlditr_t *itr, int *c, int is_free)
+static inline int64_t rll_dec(const rll_t *e, rllitr_t *itr, int *c, int is_free)
 {
 	int64_t l;
 	if (*itr->q == 7) return -1;
 	l = *itr->q>>3; *c = *itr->q&7;
-	if (++itr->q - *itr->i == RLD_LSIZE) {
+	if (++itr->q - *itr->i == RLL_BLOCK_SIZE) {
 		if (is_free) {
 			free(*itr->i);
 			*itr->i = 0;
@@ -95,19 +95,19 @@ static inline int64_t rld_dec(const rld_t *e, rlditr_t *itr, int *c, int is_free
 	return l;
 }
 
-static inline void rld_copy(rld_t *e, rlditr_t *itr, const rld_t *e0, rlditr_t *itr0, int64_t k)
+static inline void rll_copy(rll_t *e, rllitr_t *itr, const rll_t *e0, rllitr_t *itr0, int64_t k)
 {
 	if (itr0->l >= k) { // there are more pending symbols
-		rld_enc(e, itr, k, itr0->c);
+		rll_enc(e, itr, k, itr0->c);
 		itr0->l -= k; // l - k symbols remains
 	} else { // use up all pending symbols
 		int c = -1; // to please gcc
 		int64_t l;
-		rld_enc(e, itr, itr0->l, itr0->c); // write all pending symbols
+		rll_enc(e, itr, itr0->l, itr0->c); // write all pending symbols
 		k -= itr0->l;
 		for (; k > 0; k -= l) { // we always go into this loop because l0<k
-			l = rld_dec(e0, itr0, &c, 1);
-			rld_enc(e, itr, k < l? k : l, c);
+			l = rll_dec(e0, itr0, &c, 1);
+			rll_enc(e, itr, k < l? k : l, c);
 		}
 		itr0->l = -k; itr0->c = c;
 	}
@@ -127,12 +127,7 @@ static inline void rld_copy(rld_t *e, rlditr_t *itr, const rld_t *e0, rlditr_t *
 typedef struct {
 	int max;
 	uint64_t **a;
-} longdna_t;
-
-longdna_t *ld_init(void)
-{
-	return calloc(1, sizeof(longdna_t));
-}
+} longdna_t; // to allocate, simply call calloc()
 
 void ld_destroy(longdna_t *ld)
 {
@@ -172,18 +167,18 @@ typedef struct {
 KSORT_INIT(bcr, pair64_t, bcr_lt)
 
 typedef struct {
-	rld_t *e;
+	rll_t *e;
 	int64_t n, c[6];
 	pair64_t *a;
-} pbwt_t;
+} bucket_t;
 
 typedef struct {
 	int max_len;
-	uint64_t n_seqs, m_seqs, c[6], c0[6][6];
+	uint64_t n_seqs, m_seqs, c[6];
 	uint8_t *len;
 	longdna_t **seq;
 	pair64_t *a;
-	pbwt_t bwt[6];
+	bucket_t bwt[6];
 } bcr_t;
 
 bcr_t *bcr_init()
@@ -191,7 +186,7 @@ bcr_t *bcr_init()
 	bcr_t *b;
 	int i;
 	b = calloc(1, sizeof(bcr_t));
-	for (i = 0; i < 6; ++i) b->bwt[i].e = rld_init();
+	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
 	return b;
 }
 
@@ -208,7 +203,7 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	if (len > b->max_len) { // find a longer read
 		b->seq = realloc(b->seq, len * sizeof(void*));
 		for (i = b->max_len; i < len; ++i)
-			b->seq[i] = ld_init();
+			b->seq[i] = calloc(1, sizeof(longdna_t));
 		b->max_len = len;
 	}
 	if (b->n_seqs == b->m_seqs) {
@@ -221,13 +216,13 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	++b->n_seqs;
 }
 
-static void print_bwt(rld_t *e, int endl)
+static void print_bwt(rll_t *e, int endl)
 {
 	int64_t l, i;
 	int c;
-	rlditr_t itr;
-	rld_itr_init(e, &itr);
-	while ((l = rld_dec(e, &itr, &c, 0)) != -1)
+	rllitr_t itr;
+	rll_itr_init(e, &itr);
+	while ((l = rll_dec(e, &itr, &c, 0)) != -1)
 		for (i = 0; i < l; ++i)
 			fputc("$ACGTN"[c], stderr);
 	if (endl) fputc(endl, stderr);
@@ -258,10 +253,9 @@ static void set_bwt(bcr_t *bcr)
 	for (k = 0; k < 6; ++k) i[k] = c[k], bcr->c[k] += c[k], bcr->bwt[k].a = a + c[k];
 	for (k = 0; k < bcr->n_seqs; ++k) {
 		pair64_t *u = &bcr->a[k];
-		int b = bcr->a[k].v&7;
-		bcr->a[k].u += c[b];
-		a[i[b]++] = bcr->a[k];
-		fprintf(stderr, "[1] k=%lld, u=%lld, i=%lld, c=%c\n", k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
+		u->u += c[u->v&7];
+		a[i[u->v&7]++] = *u;
+		//fprintf(stderr, "[1] k=%lld, u=%lld, i=%lld, c=%c\n", k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
 	}
 	free(bcr->a);
 	bcr->a = a;
@@ -270,41 +264,42 @@ static void set_bwt(bcr_t *bcr)
 static void next_bwt(bcr_t *bcr, int class, int pos)
 {
 	int64_t c[6], k, l;
-	rlditr_t ir, iw;
-	pbwt_t *bwt = &bcr->bwt[class];
-	rld_t *ew, *er = bwt->e;
+	rllitr_t ir, iw;
+	bucket_t *bwt = &bcr->bwt[class];
+	rll_t *ew, *er = bwt->e;
 
 	if (bwt->n == 0) return;
 	if (class) ks_introsort(bcr, bwt->n, bwt->a);
-	for (l = 0; l < 6; ++l) fprintf(stderr, "%lld, ", bwt->c[l]); fputc('\n', stderr);
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
 		u->v = (u->v&~7ULL) | (pos == bcr->max_len? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
-		fprintf(stderr, "[2] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
+		//fprintf(stderr, "[2] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
 	}
-	ew = rld_init();
-	rld_itr_init(er, &ir);
-	rld_itr_init(ew, &iw);
+	ew = rll_init();
+	rll_itr_init(er, &ir);
+	rll_itr_init(ew, &iw);
 	memset(c, 0, 48);
 	for (k = l = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		int a = u->v&7;
-		if (u->u > l) rld_copy(ew, &iw, er, &ir, u->u - l);
+		if (u->u > l) rll_copy(ew, &iw, er, &ir, u->u - l);
 		l = u->u;
-		rld_enc(ew, &iw, 1, a);
+		rll_enc(ew, &iw, 1, a);
 		u->u = ((ew->mc[a] + iw.l - 1) - c[a]) + bcr->c[a] + bwt->c[a];
 		++c[a];
 	}
-	if (l < er->l) rld_copy(ew, &iw, er, &ir, er->l - l);
-	rld_enc_finalize(ew, &iw);
-	rld_destroy(er);
+	if (l < er->l) rll_copy(ew, &iw, er, &ir, er->l - l);
+	rll_enc_finalize(ew, &iw);
+	rll_destroy(er);
 	bwt->e = ew;
+	/*
 	print_bwt(ew, '\n');
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		fprintf(stderr, "[3] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c, bcr->c=%lld, bwt->c=%lld\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7], bcr->c[u->v&7], bwt->c[u->v&7]);
 	}
+	*/
 }
 
 void bcr_build(bcr_t *b)
@@ -323,8 +318,40 @@ void bcr_build(bcr_t *b)
 			for (c = 1; c <= 4; ++c)
 				next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
-		for (c = 0; c < 5; ++c) print_bwt(b->bwt[c].e, ','); fputc('\n', stderr);
+		//for (c = 0; c < 5; ++c) print_bwt(b->bwt[c].e, ','); fputc('\n', stderr);
 	}
+}
+
+typedef struct {
+	const bcr_t *b;
+	int c, i;
+} bcritr_t;
+
+bcritr_t *bcr_itr_init(const bcr_t *b)
+{
+	bcritr_t *itr;
+	itr = calloc(1, sizeof(bcritr_t));
+	itr->b = b; itr->i = -1;
+	return itr;
+}
+
+const uint8_t *bcr_itr_next(bcritr_t *itr, int *l)
+{
+	rll_t *e;
+	const uint8_t *s;
+	if (itr->c == 6) return 0;
+	++itr->i;
+	if (itr->i == itr->b->bwt[itr->c].e->n) {
+		if (++itr->c == 6) return 0;
+		itr->i = 0;
+	}
+	e = itr->b->bwt[itr->c].e;
+	s = e->z[itr->i];
+	if (itr->i == e->n - 1) {
+		for (*l = 0; *l < RLL_BLOCK_SIZE; ++*l)
+			if (s[*l] == 7) break;
+	} else *l = RLL_BLOCK_SIZE;
+	return s;
 }
 
 /*********************
@@ -372,8 +399,10 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	kseq_t *ks;
-	int c, for_only = 0, n_threads = 1;
+	int i, j, l, c, for_only = 0, n_threads = 1;
 	bcr_t *bcr;
+	bcritr_t *itr;
+	const uint8_t *s;
 
 	while ((c = getopt(argc, argv, "ft:")) >= 0)
 		if (c == 'f') for_only = 1;
@@ -399,6 +428,12 @@ int main(int argc, char *argv[])
 	gzclose(fp);
 
 	bcr_build(bcr);
+	itr = bcr_itr_init(bcr);
+	while ((s = bcr_itr_next(itr, &l)) != 0)
+		for (i = 0; i < l; ++i)
+			for (j = 0; j < s[i]>>3; ++j)
+				putchar("$ACGTN"[s[i]&7]);
+	putchar('\n');
 	bcr_destroy(bcr);
 	return 0;
 }
