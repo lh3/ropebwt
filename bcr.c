@@ -3,8 +3,115 @@
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
-#include "rld.h"
+#include <assert.h>
 #include "ksort.h"
+
+/**********************************************
+ *** Lightweight run-length encoder/decoder ***
+ **********************************************/
+
+#define RLD_LSIZE 0x100000
+
+typedef struct {
+	int c;
+	int64_t l;
+	uint8_t *q, **i;
+} rlditr_t;
+
+typedef struct {
+	int n;
+	uint8_t **z;
+	int64_t l, mc[6];
+} rld_t;
+
+static rld_t *rld_init(void)
+{
+	rld_t *e;
+	e = calloc(1, sizeof(rld_t));
+	e->n = 1;
+	e->z = malloc(sizeof(void*));
+	e->z[0] = calloc(RLD_LSIZE, 1);
+	e->z[0][0] = 7;
+	return e;
+}
+
+static void rld_destroy(rld_t *e)
+{
+	int i;
+	if (e == 0) return;
+	for (i = 0; i < e->n; ++i) free(e->z[i]);
+	free(e->z); free(e);
+}
+
+static void rld_itr_init(const rld_t *e, rlditr_t *itr)
+{
+	itr->i = e->z; itr->q = *itr->i; itr->c = -1; itr->l = 0;
+}
+
+static inline void rld_enc0(rld_t *e, rlditr_t *itr, int l, uint8_t c)
+{
+	*itr->q++ = l<<3 | c;
+	e->mc[c] += l;
+	if (itr->q - *itr->i == RLD_LSIZE) {
+		++e->n;
+		e->z = realloc(e->z, e->n * sizeof(void*));
+		itr->i = e->z + e->n - 1;
+		itr->q = *itr->i = calloc(RLD_LSIZE, 1);
+	}
+}
+
+static void rld_enc(rld_t *e, rlditr_t *itr, int64_t l, uint8_t c)
+{
+	if (itr->c != c) {
+		if (itr->l) {
+			for (; itr->l > 31; itr->l -= 31)
+				rld_enc0(e, itr, 31, itr->c);
+			rld_enc0(e, itr, itr->l, itr->c);
+		}
+		itr->l = l; itr->c = c;
+	} else itr->l += l;
+}
+
+static void rld_enc_finalize(rld_t *e, rlditr_t *itr)
+{
+	int c;
+	rld_enc0(e, itr, itr->l, itr->c);
+	*itr->q = 7; // end marker; there is always room for an extra symbol
+	for (e->l = 0, c = 0; c < 6; ++c) e->l += e->mc[c];
+}
+
+static inline int64_t rld_dec(const rld_t *e, rlditr_t *itr, int *c, int is_free)
+{
+	int64_t l;
+	if (*itr->q == 7) return -1;
+	l = *itr->q>>3; *c = *itr->q&7;
+	if (++itr->q - *itr->i == RLD_LSIZE) {
+		if (is_free) {
+			free(*itr->i);
+			*itr->i = 0;
+		}
+		itr->q = *++itr->i;
+	}
+	return l;
+}
+
+static inline void rld_copy(rld_t *e, rlditr_t *itr, const rld_t *e0, rlditr_t *itr0, int64_t k)
+{
+	if (itr0->l >= k) { // there are more pending symbols
+		rld_enc(e, itr, k, itr0->c);
+		itr0->l -= k; // l - k symbols remains
+	} else { // use up all pending symbols
+		int c = -1; // to please gcc
+		int64_t l;
+		rld_enc(e, itr, itr0->l, itr0->c); // write all pending symbols
+		k -= itr0->l;
+		for (; k > 0; k -= l) { // we always go into this loop because l0<k
+			l = rld_dec(e0, itr0, &c, 1);
+			rld_enc(e, itr, k < l? k : l, c);
+		}
+		itr0->l = -k; itr0->c = c;
+	}
+}
 
 /*************************************************
  *** Data structure for long 2-bit encoded DNA ***
@@ -50,8 +157,7 @@ inline void ld_set(longdna_t *h, int64_t x, int c)
 
 inline int ld_get(longdna_t *h, int64_t x)
 {
-	int l = x & LD_MASK;
-	return h->a[x>>LD_SHIFT][l>>5]>>((l&31)<<1)&3;
+	return h->a[x>>LD_SHIFT][(x&LD_MASK)>>5]>>((x&31)<<1)&3;
 }
 
 /***********
@@ -85,7 +191,7 @@ bcr_t *bcr_init()
 	bcr_t *b;
 	int i;
 	b = calloc(1, sizeof(bcr_t));
-	for (i = 0; i < 6; ++i) b->bwt[i].e = rld_init(6, 6);
+	for (i = 0; i < 6; ++i) b->bwt[i].e = rld_init();
 	return b;
 }
 
@@ -120,12 +226,10 @@ static void print_bwt(rld_t *e, int endl)
 	int64_t l, i;
 	int c;
 	rlditr_t itr;
-	if (e->mcnt[0]) {
-		rld_itr_init(e, &itr, 0);
-		while ((l = rld_dec(e, &itr, &c, 0)) != -1)
-			for (i = 0; i < l; ++i)
-				fputc("$ACGTN"[c], stderr);
-	}
+	rld_itr_init(e, &itr);
+	while ((l = rld_dec(e, &itr, &c, 0)) != -1)
+		for (i = 0; i < l; ++i)
+			fputc("$ACGTN"[c], stderr);
 	if (endl) fputc(endl, stderr);
 }
 
@@ -144,7 +248,7 @@ static void set_bwt(bcr_t *bcr)
 	for (l = 0; l < 6; ++l) bcr->bwt[0].c[l] = 0;
 	for (j = 1; j < 6; ++j)
 		for (l = 0; l < 6; ++l)
-			bcr->bwt[j].c[l] = bcr->bwt[j-1].e->mcnt[l+1];
+			bcr->bwt[j].c[l] = bcr->bwt[j-1].e->mc[l];
 	for (j = 1; j < 6; ++j)
 		for (l = 0; l < 6; ++l)
 			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
@@ -179,35 +283,34 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 		u->v = (u->v&~7ULL) | (pos == bcr->max_len? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
 		fprintf(stderr, "[2] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
 	}
-	ew = rld_init(6, 6);
-	rld_itr_init(er, &ir, 0);
-	rld_itr_init(ew, &iw, 0);
+	ew = rld_init();
+	rld_itr_init(er, &ir);
+	rld_itr_init(ew, &iw);
 	memset(c, 0, 48);
 	for (k = l = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
-		if (u->u > l)
-			l += rld_dec_enc_cnt(ew, &iw, er, &ir, u->u - l, c);
-		rld_enc(ew, &iw, 1, u->v&7);
-		u->u = c[u->v&7] + bcr->c[u->v&7] + bwt->c[u->v&7];
+		int a = u->v&7;
+		if (u->u > l) rld_copy(ew, &iw, er, &ir, u->u - l);
+		l = u->u;
+		rld_enc(ew, &iw, 1, a);
+		u->u = ((ew->mc[a] + iw.l - 1) - c[a]) + bcr->c[a] + bwt->c[a];
+		++c[a];
 	}
-	if (l < er->mcnt[0])
-		l += rld_dec_enc_cnt(ew, &iw, er, &ir, er->mcnt[0] - l, c);
-	rld_enc_finish_partial(ew, &iw);
-//	rld_enc_finish(ew, &iw);
+	if (l < er->l) rld_copy(ew, &iw, er, &ir, er->l - l);
+	rld_enc_finalize(ew, &iw);
 	rld_destroy(er);
 	bwt->e = ew;
+	print_bwt(ew, '\n');
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		fprintf(stderr, "[3] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c, bcr->c=%lld, bwt->c=%lld\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7], bcr->c[u->v&7], bwt->c[u->v&7]);
 	}
 }
 
-rld_t *bcr_build(bcr_t *b)
+void bcr_build(bcr_t *b)
 {
 	int64_t k;
 	int pos, c;
-	rld_t *e;
-	rlditr_t iw;
 
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs);
@@ -222,20 +325,6 @@ rld_t *bcr_build(bcr_t *b)
 		} else next_bwt(b, 0, pos);
 		for (c = 0; c < 5; ++c) print_bwt(b->bwt[c].e, ','); fputc('\n', stderr);
 	}
-
-	e = rld_init(6, 3);
-	rld_itr_init(e, &iw, 0);
-	for (c = 0; c <= 4; ++c) {
-		rld_t *er = b->bwt[c].e;
-		rlditr_t ir;
-		if (er->mcnt[0] == 0) continue;
-		rld_itr_init(er, &ir, 0);
-		rld_dec_enc(e, &iw, er, &ir, er->mcnt[0]);
-		rld_destroy(er);
-		b->bwt[c].e = 0;
-	}
-	rld_enc_finish(e, &iw);
-	return e;
 }
 
 /*********************
@@ -285,7 +374,6 @@ int main(int argc, char *argv[])
 	kseq_t *ks;
 	int c, for_only = 0, n_threads = 1;
 	bcr_t *bcr;
-	rld_t *e;
 
 	while ((c = getopt(argc, argv, "ft:")) >= 0)
 		if (c == 'f') for_only = 1;
@@ -310,8 +398,7 @@ int main(int argc, char *argv[])
 	kseq_destroy(ks);
 	gzclose(fp);
 
-	e = bcr_build(bcr);
-	rld_dump(e, "-");
+	bcr_build(bcr);
 	bcr_destroy(bcr);
 	return 0;
 }
