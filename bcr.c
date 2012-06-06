@@ -75,7 +75,7 @@ static void rll_enc(rll_t *e, rllitr_t *itr, int64_t l, uint8_t c)
 static void rll_enc_finalize(rll_t *e, rllitr_t *itr)
 {
 	int c;
-	rll_enc0(e, itr, itr->l, itr->c);
+	rll_enc(e, itr, 0, -1);
 	*itr->q = 7; // end marker; there is always room for an extra symbol
 	for (e->l = 0, c = 0; c < 6; ++c) e->l += e->mc[c];
 }
