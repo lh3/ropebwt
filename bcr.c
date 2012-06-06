@@ -6,6 +6,10 @@
 #include <assert.h>
 #include "ksort.h"
 
+#ifndef kroundup32
+#define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
+#endif
+
 /**********************************************
  *** Lightweight run-length encoder/decoder ***
  **********************************************/
@@ -19,7 +23,7 @@ typedef struct {
 } rllitr_t;
 
 typedef struct {
-	int n;
+	int n, m;
 	uint8_t **z;
 	int64_t l, mc[6];
 } rll_t;
@@ -28,7 +32,7 @@ static rll_t *rll_init(void)
 {
 	rll_t *e;
 	e = calloc(1, sizeof(rll_t));
-	e->n = 1;
+	e->n = e->m = 1;
 	e->z = malloc(sizeof(void*));
 	e->z[0] = calloc(RLL_BLOCK_SIZE, 1);
 	e->z[0][0] = 7;
@@ -53,8 +57,12 @@ static inline void rll_enc0(rll_t *e, rllitr_t *itr, int l, uint8_t c)
 	*itr->q++ = l<<3 | c;
 	e->mc[c] += l;
 	if (itr->q - *itr->i == RLL_BLOCK_SIZE) {
+		if (e->n == e->m) {
+			e->m <<= 1;
+			e->z = realloc(e->z, e->m * sizeof(void*));
+			memset(e->z + e->n, 0, (e->m - e->n) * sizeof(void*));
+		}
 		++e->n;
-		e->z = realloc(e->z, e->n * sizeof(void*));
 		itr->i = e->z + e->n - 1;
 		itr->q = *itr->i = calloc(RLL_BLOCK_SIZE, 1);
 	}
@@ -120,10 +128,6 @@ static inline void rll_copy(rll_t *e, rllitr_t *itr, const rll_t *e0, rllitr_t *
 #define LD_SHIFT 20
 #define LD_MASK  ((1U<<LD_SHIFT) - 1)
 
-#ifndef kroundup32
-#define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
-#endif
-
 typedef struct {
 	int max;
 	uint64_t **a;
@@ -133,7 +137,7 @@ void ld_destroy(longdna_t *ld)
 {
 	int j;
 	for (j = 0; j < ld->max; ++j) free(ld->a[j]);
-	free(ld);
+	free(ld->a); free(ld);
 }
 
 inline void ld_set(longdna_t *h, int64_t x, int c)
@@ -192,6 +196,8 @@ bcr_t *bcr_init()
 
 void bcr_destroy(bcr_t *b)
 {
+	int i;
+	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
 	free(b->len); free(b->a); free(b->seq);
 	free(b);
 }
@@ -214,18 +220,6 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	for (i = 0; i < len; ++i)
 		ld_set(b->seq[i], b->n_seqs, seq[len - 1 - i] - 1);
 	++b->n_seqs;
-}
-
-static void print_bwt(rll_t *e, int endl)
-{
-	int64_t l, i;
-	int c;
-	rllitr_t itr;
-	rll_itr_init(e, &itr);
-	while ((l = rll_dec(e, &itr, &c, 0)) != -1)
-		for (i = 0; i < l; ++i)
-			fputc("$ACGTN"[c], stderr);
-	if (endl) fputc(endl, stderr);
 }
 
 static void set_bwt(bcr_t *bcr)
@@ -255,7 +249,6 @@ static void set_bwt(bcr_t *bcr)
 		pair64_t *u = &bcr->a[k];
 		u->u += c[u->v&7];
 		a[i[u->v&7]++] = *u;
-		//fprintf(stderr, "[1] k=%lld, u=%lld, i=%lld, c=%c\n", k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
 	}
 	free(bcr->a);
 	bcr->a = a;
@@ -274,7 +267,6 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
 		u->v = (u->v&~7ULL) | (pos == bcr->max_len? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
-		//fprintf(stderr, "[2] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7]);
 	}
 	ew = rll_init();
 	rll_itr_init(er, &ir);
@@ -293,13 +285,6 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_enc_finalize(ew, &iw);
 	rll_destroy(er);
 	bwt->e = ew;
-	/*
-	print_bwt(ew, '\n');
-	for (k = 0; k < bwt->n; ++k) {
-		pair64_t *u = &bwt->a[k];
-		fprintf(stderr, "[3] class=%c, pos=%d, k=%lld, u=%lld, i=%lld, c=%c, bcr->c=%lld, bwt->c=%lld\n", "$ACGTN"[class], pos, k, u->u, u->v>>3, "$ACGTN"[u->v&7], bcr->c[u->v&7], bwt->c[u->v&7]);
-	}
-	*/
 }
 
 void bcr_build(bcr_t *b)
@@ -318,7 +303,7 @@ void bcr_build(bcr_t *b)
 			for (c = 1; c <= 4; ++c)
 				next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
-		//for (c = 0; c < 5; ++c) print_bwt(b->bwt[c].e, ','); fputc('\n', stderr);
+		if (pos != b->max_len) ld_destroy(b->seq[pos]);
 	}
 }
 
@@ -399,16 +384,15 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	kseq_t *ks;
-	int i, j, l, c, for_only = 0, n_threads = 1;
+	int i, j, l, c, for_only = 0;
 	bcr_t *bcr;
 	bcritr_t *itr;
 	const uint8_t *s;
 
-	while ((c = getopt(argc, argv, "ft:")) >= 0)
+	while ((c = getopt(argc, argv, "ft")) >= 0)
 		if (c == 'f') for_only = 1;
-		else if (c == 't') n_threads = atoi(optarg);
 	if (optind == argc) {
-		fprintf(stderr, "Usage: bcr-mt [-f] [-t nThreads=1] <in.fq.gz>\n");
+		fprintf(stderr, "Usage: bcr-mt [-ft] <in.fq.gz>\n");
 		return 1;
 	}
 
@@ -434,6 +418,7 @@ int main(int argc, char *argv[])
 			for (j = 0; j < s[i]>>3; ++j)
 				putchar("$ACGTN"[s[i]&7]);
 	putchar('\n');
+	free(itr);
 	bcr_destroy(bcr);
 	return 0;
 }
