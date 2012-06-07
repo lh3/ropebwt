@@ -68,7 +68,7 @@ static inline void rll_enc0(rll_t *e, rllitr_t *itr, int l, uint8_t c)
 	}
 }
 
-static void rll_enc(rll_t *e, rllitr_t *itr, int64_t l, uint8_t c)
+static inline void rll_enc(rll_t *e, rllitr_t *itr, int64_t l, uint8_t c)
 {
 	if (itr->c != c) {
 		if (itr->l) {
@@ -173,7 +173,7 @@ KSORT_INIT(bcr, pair64_t, bcr_lt)
 typedef struct {
 	rll_t *e;
 	int64_t n, c[6];
-	pair64_t *a;
+	pair64_t *a, *tmp;
 } bucket_t;
 
 typedef struct {
@@ -181,7 +181,6 @@ typedef struct {
 	uint64_t n_seqs, m_seqs, c[6];
 	uint8_t *len;
 	longdna_t **seq;
-	pair64_t *a;
 	bucket_t bwt[6];
 } bcr_t;
 
@@ -198,7 +197,7 @@ void bcr_destroy(bcr_t *b)
 {
 	int i;
 	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
-	free(b->len); free(b->a); free(b->seq);
+	free(b->len); free(b->seq);
 	free(b);
 }
 
@@ -222,14 +221,13 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	++b->n_seqs;
 }
 
-static void set_bwt(bcr_t *bcr)
+static void set_bwt(bcr_t *bcr, pair64_t *a0, pair64_t *a1)
 {
 	int64_t k, c[6], i[6];
 	int j, l;
-	pair64_t *a;
 	memset(c, 0, 48);
 	for (k = 0; k < bcr->n_seqs; ++k) {
-		pair64_t *u = &bcr->a[k];
+		pair64_t *u = &a0[k];
 		u->u += c[u->v&7];
 		++c[u->v&7];
 	}
@@ -243,15 +241,16 @@ static void set_bwt(bcr_t *bcr)
 			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
 	memmove(c + 1, c, 40);
 	for (k = 1, c[0] = 0; k < 6; ++k) c[k] += c[k - 1];
-	a = malloc(bcr->n_seqs * 16);
-	for (k = 0; k < 6; ++k) i[k] = c[k], bcr->c[k] += c[k], bcr->bwt[k].a = a + c[k];
-	for (k = 0; k < bcr->n_seqs; ++k) {
-		pair64_t *u = &bcr->a[k];
-		u->u += c[u->v&7];
-		a[i[u->v&7]++] = *u;
+	for (k = 0; k < 6; ++k) {
+		i[k] = c[k], bcr->c[k] += c[k];
+		bcr->bwt[k].a = a1 + c[k];
+		bcr->bwt[k].tmp = a0 + c[k];
 	}
-	free(bcr->a);
-	bcr->a = a;
+	for (k = 0; k < bcr->n_seqs; ++k) {
+		pair64_t *u = &a0[k];
+		u->u += c[u->v&7];
+		a1[i[u->v&7]++] = *u;
+	}
 }
 
 static void next_bwt(bcr_t *bcr, int class, int pos)
@@ -262,7 +261,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_t *ew, *er = bwt->e;
 
 	if (bwt->n == 0) return;
-	if (class) ks_introsort(bcr, bwt->n, bwt->a);
+	if (class) ks_mergesort(bcr, bwt->n, bwt->a, bwt->tmp);
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
@@ -290,21 +289,24 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 void bcr_build(bcr_t *b)
 {
 	int64_t k;
-	int pos, c;
+	int pos, c, curr = 0;
+	pair64_t *a[2];
 
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs);
-	b->a = malloc(b->n_seqs * 16);
-	assert(b->a);
-	for (k = 0; k < b->n_seqs; ++k) b->a[k].u = 0, b->a[k].v = k<<3;
-	for (pos = 0; pos <= b->max_len; ++pos) {
-		set_bwt(b);
+	a[0] = malloc(b->n_seqs * 16);
+	a[1] = malloc(b->n_seqs * 16);
+	assert(a[0] && a[1]);
+	for (k = 0; k < b->n_seqs; ++k) a[0][k].u = 0, a[0][k].v = k<<3;
+	for (pos = 0; pos <= b->max_len; ++pos, curr ^= 1) {
+		set_bwt(b, a[curr], a[curr^1]);
 		if (pos) {
 			for (c = 1; c <= 4; ++c)
 				next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
 	}
+	free(a[0]); free(a[1]);
 }
 
 typedef struct {
