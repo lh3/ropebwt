@@ -166,6 +166,7 @@ typedef struct {
 	uint64_t u, v; // $u: position; $v: seq_id:61, base:3
 } pair64_t;
 
+#define rsint_t uint64_t
 #define rstype_t pair64_t
 #define rskey(x) ((x).u)
 
@@ -210,8 +211,8 @@ void rs_combsort(size_t n, rstype_t a[])
 void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 {
 	rstype_t *i, tmp;
-	int m = (1<<n_bits) - 1;
 	rsbucket_t *k, *l, *be;
+	int m = (1<<n_bits) - 1;
 
 	be = b + (1<<n_bits);
 	for (k = b; k != be; ++k) k->b = k->e = beg;
@@ -220,10 +221,12 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
+		int tmp2;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
-		while (b + (rskey(*l->b)>>s&m) == l) ++l->b;
+		tmp2 = l - b;
+		while ((rskey(*l->b)>>s&m) == tmp2) ++l->b;
 		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
@@ -265,10 +268,12 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
+		size_t tmp2;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + ((*k->b).v&7);
 		if (k == l) { ++k->b; continue; }
-		while (b + ((*l->b).v&7) == l) ++l->b;
+		tmp2 = l - b;
+		while (((*l->b).v&7) == tmp2) ++l->b;
 		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
