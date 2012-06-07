@@ -223,21 +223,22 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
-		rstype_t swap[2];
+		rstype_t tmp, *p[2];
 		int curr = 0;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
-		swap[curr] = *k->b;
+		p[curr] = k->b; p[!curr] = &tmp;
 		do {
 			size_t tmp2 = l - b;
 			while ((rskey(*l->b)>>s&m) == tmp2) ++l->b;
-			swap[!curr] = *l->b;
-			*l->b = swap[curr];
-			curr ^= 1;
-			l = b + (rskey(swap[curr])>>s&m);
+			*p[!curr] = *l->b;
+			*l->b = *p[curr];
+			curr = !curr;
+			l = b + (rskey(*p[curr])>>s&m);
 		} while (l != k);
-		*k->b++ = swap[curr];
+		if (curr != 0) *k->b = tmp;
+		++k->b;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
