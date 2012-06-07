@@ -178,11 +178,13 @@ typedef struct {
 
 static inline void rs_insertsort(rstype_t *s, rstype_t *t)
 {
-	rstype_t *i, *j, swap_tmp;
-	for (i = s + 1; i < t; ++i)
-		for (j = i; j > s && rskey(*j) < rskey(*(j-1)); --j) {
-			swap_tmp = *j; *j = *(j-1); *(j-1) = swap_tmp;
-		}
+	rstype_t *i;
+	for (i = s + 1; i < t; ++i) {
+		rstype_t *j, tmp = *i;
+		for (j = i; j > s && rskey(tmp) < rskey(*(j-1)); --j)
+			*j = *(j - 1);
+		*j = tmp;
+	}
 }
 
 void rs_combsort(size_t n, rstype_t a[])
