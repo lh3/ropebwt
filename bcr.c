@@ -265,18 +265,14 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
  *** Classify pair64_t::v&7 ***
  ******************************/
 
-void rs_classify_alt(rstype_t *beg, rstype_t *end)
+void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 {
-	rstype_t *i;
 	rsbucket_t *b, *k, *l, *be;
-
 	b = alloca(sizeof(rsbucket_t) * 8);
 	be = b + 8;
-	for (k = b; k != be; ++k) k->b = k->e = beg;
-	for (i = beg; i != end; ++i) ++b[(*i).v&7].e;
-	if (b[0].e == end) return; // no need to sort
-	for (k = b + 1; k != be; ++k)
-		k->e += (k-1)->e - beg, k->b = (k-1)->e;
+	for (k = b; k != be; ++k) k->b = beg + ac[k-b];
+	for (k = b; k != be - 1; ++k) k->e = (k+1)->b;
+	k->e = end;
 	for (k = b; k != be;) {
 		rstype_t swap[2];
 		int curr = 0;
@@ -355,9 +351,9 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 
 static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 {
-	int64_t k, c[6], m;
+	int64_t k, c[8], m;
 	int j, l;
-	memset(c, 0, 48);
+	memset(c, 0, 64);
 	if (pos == 0) {
 		for (k = 0; k < bcr->n_seqs; ++k) {
 			pair64_t *u = &a[k];
@@ -383,7 +379,7 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 		for (l = 0; l < 6; ++l)
 			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
 	memmove(c + 1, c, 40);
-	for (k = 1, c[0] = 0; k < 6; ++k) c[k] += c[k - 1];
+	for (k = 1, c[0] = 0; k < 8; ++k) c[k] += c[k - 1]; // NB: MUST BE "8"; otherwise rs_classify_alt() will fail
 #if 0
 	pair64_t *tmp = malloc(sizeof(pair64_t) * bcr->n_seqs);
 	int64_t i[6];
@@ -392,7 +388,7 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 		tmp[i[a[k].v&7]++] = a[k];
 	free(a); a = tmp;
 #else
-	rs_classify_alt(a, a + bcr->n_seqs);
+	rs_classify_alt(a, a + bcr->n_seqs, c);
 #endif
 	for (j = 0; j < 6; ++j)
 		bcr->c[j] += c[j], bcr->bwt[j].a = a + c[j];
