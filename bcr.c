@@ -71,8 +71,9 @@ static inline void rll_enc(rll_t *e, rllitr_t *itr, int64_t l, uint8_t c)
 {
 	if (itr->c != c) {
 		if (itr->l) {
-			for (; itr->l > 31; itr->l -= 31)
-				rll_enc0(e, itr, 31, itr->c);
+			if (itr->l > 31) 
+				for (; itr->l > 31; itr->l -= 31)
+					rll_enc0(e, itr, 31, itr->c);
 			rll_enc0(e, itr, itr->l, itr->c);
 		}
 		itr->l = l; itr->c = c;
