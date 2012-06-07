@@ -320,7 +320,7 @@ typedef struct {
 
 struct bcr_s {
 	int max_len, n_threads;
-	uint64_t n_seqs, m_seqs, c[6];
+	uint64_t n_seqs, m_seqs, c[6], tot;
 	uint16_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
@@ -373,6 +373,7 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 		}
 		bcr->n_seqs = m;
 	}
+	bcr->tot += bcr->n_seqs;
 	for (j = 0; j < 6; ++j) bcr->bwt[j].n = c[j];
 	for (l = 0; l < 6; ++l) bcr->bwt[0].c[l] = 0;
 	for (j = 1; j < 6; ++j)
@@ -407,7 +408,8 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_t *ew, *er = bwt->e;
 
 	if (bwt->n == 0) return;
-	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, 56);
+	for (k = bcr->tot, l = 0; k; k >>= 1, ++l);
+	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0);
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
