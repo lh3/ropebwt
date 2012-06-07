@@ -159,13 +159,125 @@ inline int ld_get(longdna_t *h, int64_t x)
 	return h->a[x>>LD_SHIFT][(x&LD_MASK)>>5]>>((x&31)<<1)&3;
 }
 
-/***********
- *** BCR ***
- ***********/
+/******************
+ *** Radix sort ***
+ ******************/
 
 typedef struct {
 	uint64_t u, v; // $u: position; $v: seq_id:61, base:3
 } pair64_t;
+
+#define rstype_t pair64_t
+#define rskey(x) ((x).u)
+
+#define RS_MIN_SIZE 255
+
+typedef struct {
+	rstype_t *b, *e;
+} rsbucket_t;
+
+static inline void rs_insertsort(rstype_t *s, rstype_t *t)
+{
+	rstype_t *i, *j, swap_tmp;
+	for (i = s + 1; i < t; ++i)
+		for (j = i; j > s && rskey(*j) < rskey(*(j-1)); --j) {
+			swap_tmp = *j; *j = *(j-1); *(j-1) = swap_tmp;
+		}
+}
+
+void rs_combsort(size_t n, rstype_t a[])
+{
+	const double shrink_factor = 1. / 1.2473309501039786540366528676643;
+	int do_swap;
+	size_t gap = n;
+	rstype_t tmp, *i, *j;
+	do {
+		if (gap > 2) {
+			gap = (size_t)(gap * shrink_factor);
+			if (gap == 9 || gap == 10) gap = 11;
+		}
+		do_swap = 0;
+		for (i = a; i < a + n - gap; ++i) {
+			j = i + gap;
+			if (rskey(*j) < rskey(*i)) {
+				tmp = *i; *i = *j; *j = tmp;
+				do_swap = 1;
+			}
+		}
+	} while (do_swap || gap > 2);
+	if (gap != 1) rs_insertsort(a, a + n);
+}
+
+void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
+{
+	rstype_t *i, tmp;
+	int m = (1<<n_bits) - 1;
+	rsbucket_t *k, *l, *be;
+
+	be = b + (1<<n_bits);
+	for (k = b; k != be; ++k) k->b = k->e = beg;
+	for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e;
+	if (b[0].e == end) return; // no need to sort
+	for (k = b + 1; k != be; ++k)
+		k->e += (k-1)->e - beg, k->b = (k-1)->e;
+	for (k = b; k != be;) {
+		if (k->b == k->e) { ++k; continue; }
+		l = b + (rskey(*k->b)>>s&m);
+		if (k == l) { ++k->b; continue; }
+		while (b + (rskey(*l->b)>>s&m) == l) ++l->b;
+		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
+	}
+	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
+	b->b = beg;
+}
+
+void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
+{
+	if (end - beg < 2) { // already sorted
+		return;
+	} else if (end - beg > RS_MIN_SIZE) {
+		rsbucket_t *b;
+		int i;
+		b = malloc(sizeof(rsbucket_t) * (1<<n_bits));
+		rs_classify(beg, end, n_bits, s, b);
+		if (s) {
+			s = s > n_bits? s - n_bits : 0;
+			for (i = 0; i != 1<<n_bits; ++i)
+				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
+		}
+		free(b);
+	} else rs_combsort(end - beg, beg);
+}
+
+/******************************
+ *** Classify pair64_t::v&7 ***
+ ******************************/
+
+void rs_classify_alt(rstype_t *beg, rstype_t *end)
+{
+	rstype_t *i, tmp;
+	rsbucket_t *b, *k, *l, *be;
+
+	b = alloca(sizeof(rsbucket_t) * 8);
+	be = b + 7;
+	for (k = b; k != be; ++k) k->b = k->e = beg;
+	for (i = beg; i != end; ++i) ++b[(*i).v&7].e;
+	if (b[0].e == end) return; // no need to sort
+	for (k = b + 1; k != be; ++k)
+		k->e += (k-1)->e - beg, k->b = (k-1)->e;
+	for (k = b; k != be;) {
+		if (k->b == k->e) { ++k; continue; }
+		l = b + ((*k->b).v&7);
+		if (k == l) { ++k->b; continue; }
+		while (b + ((*l->b).v&7) == l) ++l->b;
+		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
+	}
+	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
+	b->b = beg;
+}
+/***********
+ *** BCR ***
+ ***********/
 
 #define bcr_lt(a, b) ((a).u < (b).u)
 KSORT_INIT(bcr, pair64_t, bcr_lt)
@@ -261,7 +373,8 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_t *ew, *er = bwt->e;
 
 	if (bwt->n == 0) return;
-	if (class) ks_mergesort(bcr, bwt->n, bwt->a, bwt->tmp);
+//	if (class) ks_mergesort(bcr, bwt->n, bwt->a, bwt->tmp);
+	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, 56);
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
