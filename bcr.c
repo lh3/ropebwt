@@ -274,6 +274,7 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
 }
+
 /***********
  *** BCR ***
  ***********/
