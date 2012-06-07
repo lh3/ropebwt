@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
 
 	if (algo == BCR) {
 		bcr = bcr_init(flag&FLAG_THR);
-		fprintf(stderr, "[W::%s] with bcr, all sequences must be of equal length; an ambiguous base converted to a random base\n", __func__);
+		fprintf(stderr, "[W::%s] with bcr, an ambiguous base will be converted to a random base\n", __func__);
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);
 	fp = gzopen(argv[optind], "rb");

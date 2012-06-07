@@ -303,7 +303,7 @@ typedef struct {
 struct bcr_s {
 	int max_len, n_threads;
 	uint64_t n_seqs, m_seqs, c[6];
-	uint8_t *len;
+	uint16_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
 #ifdef HAVE_PTHREAD
@@ -318,7 +318,7 @@ struct bcr_s {
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
 {
 	int i;
-	assert(len < 256 && len > 1);
+	assert(len >= 1 && len < 65536);
 	if (len > b->max_len) { // find a longer read
 		b->seq = realloc(b->seq, len * sizeof(void*));
 		for (i = b->max_len; i < len; ++i)
@@ -327,7 +327,7 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	}
 	if (b->n_seqs == b->m_seqs) {
 		b->m_seqs = b->m_seqs? b->m_seqs<<1 : 256;
-		b->len = realloc(b->len, b->m_seqs);
+		b->len = realloc(b->len, b->m_seqs * 2);
 	}
 	b->len[b->n_seqs] = len;
 	for (i = 0; i < len; ++i)
@@ -335,15 +335,25 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	++b->n_seqs;
 }
 
-static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a)
+static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 {
-	int64_t k, c[6];
+	int64_t k, c[6], m;
 	int j, l;
 	memset(c, 0, 48);
-	for (k = 0; k < bcr->n_seqs; ++k) {
-		pair64_t *u = &a[k];
-		u->u += c[u->v&7];
-		++c[u->v&7];
+	if (pos == 0) {
+		for (k = 0; k < bcr->n_seqs; ++k) {
+			pair64_t *u = &a[k];
+			u->u += c[u->v&7], ++c[u->v&7];
+		}
+	} else {
+		for (k = m = 0; k < bcr->n_seqs; ++k) {
+			pair64_t *u = &a[k];
+			if ((u->v&7) == 0) continue;
+			u->u += c[u->v&7], ++c[u->v&7];
+			if (m == k) ++m;
+			else a[m++] = a[k];
+		}
+		bcr->n_seqs = m;
 	}
 	for (j = 0; j < 6; ++j) bcr->bwt[j].n = c[j];
 	for (l = 0; l < 6; ++l) bcr->bwt[0].c[l] = 0;
@@ -383,7 +393,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
-		u->v = (u->v&~7ULL) | (pos == bcr->max_len? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
+		u->v = (u->v&~7ULL) | (pos >= bcr->len[u->v>>3]? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
 	}
 	ew = rll_init();
 	rll_itr_init(er, &ir);
@@ -459,11 +469,11 @@ void bcr_build(bcr_t *b)
 	pair64_t *a;
 
 	b->m_seqs = b->n_seqs;
-	b->len = realloc(b->len, b->n_seqs);
+	b->len = realloc(b->len, b->n_seqs * 2);
 	a = malloc(b->n_seqs * 16);
 	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<3;
 	for (pos = 0; pos <= b->max_len; ++pos) {
-		a = set_bwt(b, a);
+		a = set_bwt(b, a, pos);
 		if (pos) {
 #if defined(HAVE_PTHREAD)
 			if (b->n_threads > 1) {
