@@ -237,7 +237,7 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 			curr = !curr;
 			l = b + (rskey(*p[curr])>>s&m);
 		} while (l != k);
-		if (curr != 0) *k->b = tmp;
+		if (curr) *k->b = tmp;
 		++k->b;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
@@ -275,21 +275,22 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 	for (k = b; k != be - 1; ++k) k->e = (k+1)->b;
 	k->e = end;
 	for (k = b; k != be;) {
-		rstype_t swap[2];
+		rstype_t tmp, *p[2];
 		int curr = 0;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + ((*k->b).v&7);
 		if (k == l) { ++k->b; continue; }
-		swap[curr] = *k->b;
+		p[curr] = k->b; p[!curr] = &tmp;
 		do {
 			size_t tmp2 = l - b;
 			while (((*l->b).v&7) == tmp2) ++l->b;
-			swap[!curr] = *l->b;
-			*l->b = swap[curr];
-			curr ^= 1;
-			l = b + (swap[curr].v&7);
+			*p[!curr] = *l->b;
+			*l->b = *p[curr];
+			curr = !curr;
+			l = b + (p[curr]->v&7);
 		} while (l != k);
-		*k->b++ = swap[curr];
+		if (curr) *k->b = tmp;
+		++k->b;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
