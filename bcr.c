@@ -212,9 +212,9 @@ void rs_combsort(size_t n, rstype_t a[])
 
 void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 {
-	rstype_t *i, tmp;
-	rsbucket_t *k, *l, *be;
+	rstype_t *i;
 	int m = (1<<n_bits) - 1;
+	rsbucket_t *k, *l, *be;
 
 	be = b + (1<<n_bits);
 	for (k = b; k != be; ++k) k->b = k->e = beg;
@@ -223,13 +223,21 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
-		int tmp2;
+		rstype_t swap[2];
+		int curr = 0;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
-		tmp2 = l - b;
-		while ((rskey(*l->b)>>s&m) == tmp2) ++l->b;
-		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
+		swap[curr] = *k->b;
+		do {
+			size_t tmp2 = l - b;
+			while ((rskey(*l->b)>>s&m) == tmp2) ++l->b;
+			swap[!curr] = *l->b;
+			*l->b = swap[curr];
+			curr ^= 1;
+			l = b + (rskey(swap[curr])>>s&m);
+		} while (l != k);
+		*k->b++ = swap[curr];
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
@@ -259,7 +267,7 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 
 void rs_classify_alt(rstype_t *beg, rstype_t *end)
 {
-	rstype_t *i, tmp;
+	rstype_t *i;
 	rsbucket_t *b, *k, *l, *be;
 
 	b = alloca(sizeof(rsbucket_t) * 8);
@@ -270,13 +278,21 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
-		size_t tmp2;
+		rstype_t swap[2];
+		int curr = 0;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + ((*k->b).v&7);
 		if (k == l) { ++k->b; continue; }
-		tmp2 = l - b;
-		while (((*l->b).v&7) == tmp2) ++l->b;
-		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
+		swap[curr] = *k->b;
+		do {
+			size_t tmp2 = l - b;
+			while (((*l->b).v&7) == tmp2) ++l->b;
+			swap[!curr] = *l->b;
+			*l->b = swap[curr];
+			curr ^= 1;
+			l = b + (swap[curr].v&7);
+		} while (l != k);
+		*k->b++ = swap[curr];
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
