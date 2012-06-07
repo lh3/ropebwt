@@ -329,7 +329,7 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	++b->n_seqs;
 }
 
-static void set_bwt(bcr_t *bcr, pair64_t *a)
+static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a)
 {
 	int64_t k, c[6];
 	int j, l;
@@ -349,10 +349,20 @@ static void set_bwt(bcr_t *bcr, pair64_t *a)
 			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
 	memmove(c + 1, c, 40);
 	for (k = 1, c[0] = 0; k < 6; ++k) c[k] += c[k - 1];
+#if 0
+	pair64_t *tmp = malloc(sizeof(pair64_t) * bcr->n_seqs);
+	int64_t i[6];
+	for (j = 0; j < 6; ++j) i[j] = c[j];
+	for (k = 0; k < bcr->n_seqs; ++k)
+		tmp[i[a[k].v&7]++] = a[k];
+	free(a); a = tmp;
+#else
 	rs_classify_alt(a, a + bcr->n_seqs);
-	for (k = 0; k < 6; ++k)
-		bcr->c[k] += c[k], bcr->bwt[k].a = a + c[k];
+#endif
+	for (j = 0; j < 6; ++j)
+		bcr->c[j] += c[j], bcr->bwt[j].a = a + c[j];
 	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += c[a[k].v&7];
+	return a;
 }
 
 static void next_bwt(bcr_t *bcr, int class, int pos)
@@ -399,7 +409,7 @@ void bcr_build(bcr_t *b)
 	a = malloc(b->n_seqs * 16);
 	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<3;
 	for (pos = 0; pos <= b->max_len; ++pos) {
-		set_bwt(b, a);
+		a = set_bwt(b, a);
 		if (pos) {
 			for (c = 1; c <= 4; ++c)
 				next_bwt(b, c, pos);
