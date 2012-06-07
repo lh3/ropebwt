@@ -4,7 +4,6 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <assert.h>
-#include "ksort.h"
 
 #ifndef kroundup32
 #define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
@@ -279,13 +278,10 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
  *** BCR ***
  ***********/
 
-#define bcr_lt(a, b) ((a).u < (b).u)
-KSORT_INIT(bcr, pair64_t, bcr_lt)
-
 typedef struct {
 	rll_t *e;
 	int64_t n, c[6];
-	pair64_t *a, *tmp;
+	pair64_t *a;
 } bucket_t;
 
 typedef struct {
@@ -356,7 +352,6 @@ static void set_bwt(bcr_t *bcr, pair64_t *a0, pair64_t *a1)
 	for (k = 0; k < 6; ++k) {
 		i[k] = c[k], bcr->c[k] += c[k];
 		bcr->bwt[k].a = a1 + c[k];
-		bcr->bwt[k].tmp = a0 + c[k];
 	}
 	for (k = 0; k < bcr->n_seqs; ++k) {
 		pair64_t *u = &a0[k];
@@ -373,7 +368,6 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_t *ew, *er = bwt->e;
 
 	if (bwt->n == 0) return;
-//	if (class) ks_mergesort(bcr, bwt->n, bwt->a, bwt->tmp);
 	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, 56);
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
