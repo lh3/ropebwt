@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "rld.h"
-#include "ropebwt.h"
+#include "bpr-mt.h"
 
 #if defined(__APPLE__)
 #include <sys/types.h>

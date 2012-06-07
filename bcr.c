@@ -278,9 +278,11 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
 /***********
  *** BCR ***
  ***********/
+
 #ifdef HAVE_PTHREAD
 #include <pthread.h>
 #endif
+#include "bcr.h"
 
 typedef struct {
 	rll_t *e;
@@ -293,7 +295,7 @@ typedef struct {
 	int class, pos, toproc;
 } worker_t;
 
-typedef struct bcr_s {
+struct bcr_s {
 	int max_len, n_threads;
 	uint64_t n_seqs, m_seqs, c[6];
 	uint8_t *len;
@@ -306,7 +308,7 @@ typedef struct bcr_s {
 	pthread_cond_t cv;
 	volatile int proc_cnt;
 #endif
-} bcr_t;
+};
 
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
 {
@@ -478,10 +480,10 @@ void bcr_build(bcr_t *b)
 	free(a);
 }
 
-typedef struct {
+struct bcritr_s {
 	const bcr_t *b;
 	int c, i;
-} bcritr_t;
+};
 
 bcritr_t *bcr_itr_init(const bcr_t *b)
 {
@@ -508,89 +510,4 @@ const uint8_t *bcr_itr_next(bcritr_t *itr, int *l)
 			if (s[*l] == 7) break;
 	} else *l = RLL_BLOCK_SIZE;
 	return s;
-}
-
-/*********************
- *** Main function ***
- *********************/
-
-#include <zlib.h>
-#include <unistd.h>
-#include "kseq.h"
-KSEQ_INIT(gzFile, gzread)
-
-unsigned char seq_nt6_table[128] = {
-    0, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 1, 5, 2,  5, 5, 5, 3,  5, 5, 5, 5,  5, 5, 5, 5,
-    5, 5, 5, 5,  4, 5, 5, 5,  5, 5, 5, 5,  5, 5, 5, 5
-};
-
-void seq_char2nt6(int l, unsigned char *s)
-{
-	int i;
-	for (i = 0; i < l; ++i) {
-		s[i] = s[i] < 128? seq_nt6_table[s[i]] : 5;
-		if (s[i] >= 5) s[i] = (lrand48()&3) + 1;
-	}
-}
-
-void seq_revcomp6(int l, unsigned char *s)
-{
-	int i;
-	for (i = 0; i < l>>1; ++i) {
-		int tmp = s[l-1-i];
-		tmp = (tmp >= 1 && tmp <= 4)? 5 - tmp : tmp;
-		s[l-1-i] = (s[i] >= 1 && s[i] <= 4)? 5 - s[i] : s[i];
-		s[i] = tmp;
-	}
-	if (l&1) s[i] = (s[i] >= 1 && s[i] <= 4)? 5 - s[i] : s[i];
-}
-
-int main(int argc, char *argv[])
-{
-	gzFile fp;
-	kseq_t *ks;
-	int i, j, l, c, for_only = 0, is_thr = 0;
-	bcr_t *bcr;
-	bcritr_t *itr;
-	const uint8_t *s;
-
-	while ((c = getopt(argc, argv, "ft")) >= 0)
-		if (c == 'f') for_only = 1;
-		else if (c == 't') is_thr = 1;
-	if (optind == argc) {
-		fprintf(stderr, "Usage: bcr-mt [-ft] <in.fq.gz>\n");
-		return 1;
-	}
-
-	bcr = bcr_init(is_thr);
-	fp = gzopen(argv[optind], "rb");
-	ks = kseq_init(fp);
-	while (kseq_read(ks) >= 0) {
-		uint8_t *s = (uint8_t*)ks->seq.s;
-		seq_char2nt6(ks->seq.l, s);
-		bcr_append(bcr, ks->seq.l, s);
-		if (!for_only) {
-			seq_revcomp6(ks->seq.l, s);
-			bcr_append(bcr, ks->seq.l, s);
-		}
-	}
-	kseq_destroy(ks);
-	gzclose(fp);
-
-	bcr_build(bcr);
-	itr = bcr_itr_init(bcr);
-	while ((s = bcr_itr_next(itr, &l)) != 0)
-		for (i = 0; i < l; ++i)
-			for (j = 0; j < s[i]>>3; ++j)
-				putchar("$ACGTN"[s[i]&7]);
-	putchar('\n');
-	free(itr);
-	bcr_destroy(bcr);
-	return 0;
 }

@@ -1,8 +1,7 @@
 CC=			gcc
 CFLAGS=		-g -Wall -O2 #-fno-inline-functions -fno-inline-functions-called-once
-DFLAGS=		-DHAVE_PTHREAD
-OBJS=		bprope6.o rld.o ropebwt.o
-PROG=		ropebwt bcrbwt
+DFLAGS=
+PROG=		bpr-mt ropebwt
 INCLUDES=	
 LIBS=		-lpthread -lz
 
@@ -13,13 +12,17 @@ LIBS=		-lpthread -lz
 
 all:$(PROG)
 
-ropebwt:$(OBJS) main.o
-		$(CC) $(CFLAGS) $(DFLAGS) $(OBJS) main.o -o $@ $(LIBS)
+bpr-mt:bprope6.o rld.o bpr-mt.o main-bpr-mt.o
+		$(CC) $(CFLAGS) $(DFLAGS) $^ -o $@ $(LIBS)
 
-bcrbwt:bcr.o
-		$(CC) $(CFLAGS) $(DFLAGS) bcr.o -o $@ $(LIBS)
+ropebwt:bprope6.o rbrope6.o bcr.o main-misc.o
+		$(CC) $(CFLAGS) $(DFLAGS) $^ -o $@ $(LIBS)
 
 bprope6.o:bprope6.h
+rbrope6.o:rbrope6.h
+
+bcr.o:bcr.c bcr.h
+		$(CC) -c $(CFLAGS) $(DFLAGS) -DHAVE_PTHREAD $(INCLUDES) $< -o $@
 
 rld.o:rld.c rld.h
 		$(CC) -c $(CFLAGS) $(DFLAGS) -D_DNA_ONLY -D_NO_UTILS_H rld.c -o $@

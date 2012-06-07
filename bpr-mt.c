@@ -137,7 +137,7 @@ rld_t *rld_merge2(rld_t *e0, rld_t *e1, int n_threads, int64_t offset, int64_t s
 #include <unistd.h>
 #include <zlib.h>
 #include "bprope6.h"
-#include "ropebwt.h"
+#include "bpr-mt.h"
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
