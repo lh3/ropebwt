@@ -1,6 +1,6 @@
 CC=			gcc
 CFLAGS=		-g -Wall -O2 #-fno-inline-functions -fno-inline-functions-called-once
-DFLAGS=		
+DFLAGS=		-DHAVE_PTHREAD
 OBJS=		bprope6.o rld.o ropebwt.o
 PROG=		ropebwt bcrbwt
 INCLUDES=	

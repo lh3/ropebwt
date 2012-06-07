@@ -278,6 +278,9 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
 /***********
  *** BCR ***
  ***********/
+#ifdef HAVE_PTHREAD
+#include <pthread.h>
+#endif
 
 typedef struct {
 	rll_t *e;
@@ -286,29 +289,24 @@ typedef struct {
 } bucket_t;
 
 typedef struct {
-	int max_len;
+	struct bcr_s *bcr;
+	int class, pos, toproc;
+} worker_t;
+
+typedef struct bcr_s {
+	int max_len, n_threads;
 	uint64_t n_seqs, m_seqs, c[6];
 	uint8_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
+#ifdef HAVE_PTHREAD
+	pthread_t *tid;
+	worker_t *w;
+	pthread_mutex_t lock;
+	pthread_cond_t cv;
+	volatile int proc_cnt;
+#endif
 } bcr_t;
-
-bcr_t *bcr_init()
-{
-	bcr_t *b;
-	int i;
-	b = calloc(1, sizeof(bcr_t));
-	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
-	return b;
-}
-
-void bcr_destroy(bcr_t *b)
-{
-	int i;
-	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
-	free(b->len); free(b->seq);
-	free(b);
-}
 
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
 {
@@ -398,6 +396,54 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_destroy(er);
 	bwt->e = ew;
 }
+#ifdef HAVE_PTHREAD
+static int worker_aux(worker_t *w)
+{
+	pthread_mutex_lock(&w->bcr->lock);
+	while (!w->toproc)
+		pthread_cond_wait(&w->bcr->cv, &w->bcr->lock);
+	w->toproc = 0;
+	pthread_mutex_unlock(&w->bcr->lock);
+	next_bwt(w->bcr, w->class, w->pos);
+	__sync_fetch_and_add(&w->bcr->proc_cnt, 1);
+	return (w->bcr->max_len == w->pos);
+}
+
+static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
+#endif
+bcr_t *bcr_init(int is_thr)
+{
+	bcr_t *b;
+	int i;
+	b = calloc(1, sizeof(bcr_t));
+	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
+#ifdef HAVE_PTHREAD
+	if (is_thr) {
+		b->n_threads = 4;
+		pthread_mutex_init(&b->lock, 0);
+		pthread_cond_init(&b->cv, 0);
+		b->tid = calloc(b->n_threads, sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
+		b->w = calloc(b->n_threads, sizeof(worker_t));
+		for (i = 0; i < b->n_threads; ++i) b->w[i].class = i + 1, b->w[i].bcr = b;
+		for (i = 1; i < b->n_threads; ++i) pthread_create(&b->tid[i], 0, worker, &b->w[i]);
+	}
+#endif
+	return b;
+}
+
+void bcr_destroy(bcr_t *b)
+{
+	int i;
+#ifdef HAVE_PTHREAD
+	if (b->tid) for (i = 1; i < b->n_threads; ++i) pthread_join(b->tid[i], 0);
+	pthread_mutex_destroy(&b->lock);
+	pthread_cond_destroy(&b->cv);
+	free(b->tid); free(b->w);
+#endif
+	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
+	free(b->len); free(b->seq);
+	free(b);
+}
 
 void bcr_build(bcr_t *b)
 {
@@ -412,8 +458,20 @@ void bcr_build(bcr_t *b)
 	for (pos = 0; pos <= b->max_len; ++pos) {
 		a = set_bwt(b, a);
 		if (pos) {
-			for (c = 1; c <= 4; ++c)
-				next_bwt(b, c, pos);
+#if defined(HAVE_PTHREAD)
+			if (b->n_threads > 1) {
+				pthread_mutex_lock(&b->lock);
+				for (c = 0; c < b->n_threads; ++c)
+					b->w[c].toproc = 1, b->w[c].pos = pos;
+				b->proc_cnt = 0;
+				pthread_cond_broadcast(&b->cv);
+				pthread_mutex_unlock(&b->lock);
+				worker_aux(&b->w[0]);
+				while (b->proc_cnt != b->n_threads);
+			} else for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
+#else
+			for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
+#endif
 		} else next_bwt(b, 0, pos);
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
 	}
@@ -497,19 +555,20 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	kseq_t *ks;
-	int i, j, l, c, for_only = 0;
+	int i, j, l, c, for_only = 0, is_thr = 0;
 	bcr_t *bcr;
 	bcritr_t *itr;
 	const uint8_t *s;
 
 	while ((c = getopt(argc, argv, "ft")) >= 0)
 		if (c == 'f') for_only = 1;
+		else if (c == 't') is_thr = 1;
 	if (optind == argc) {
 		fprintf(stderr, "Usage: bcr-mt [-ft] <in.fq.gz>\n");
 		return 1;
 	}
 
-	bcr = bcr_init();
+	bcr = bcr_init(is_thr);
 	fp = gzopen(argv[optind], "rb");
 	ks = kseq_init(fp);
 	while (kseq_read(ks) >= 0) {
