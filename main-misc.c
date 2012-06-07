@@ -40,7 +40,7 @@ int main(int argc, char *argv[])
 	int c, i, max_runs = 512, max_nodes = 64;
 	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD;
 
-	while ((c = getopt(argc, argv, "TFROo:r:n:t:a:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObo:r:n:ta:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -63,6 +63,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "         -r INT     max number of runs in leaves (bpr and rbr only) [%d]\n", max_runs);
 		fprintf(stderr, "         -n INT     max number children per internal node (bpr only) [%d]\n", max_nodes);
 		fprintf(stderr, "         -o FILE    output file [stdout]\n");
+		fprintf(stderr, "         -b         binary output (5+3 runs starting after 4 bytes)\n");
 		fprintf(stderr, "         -t         enable threading (bcr only)\n");
 		fprintf(stderr, "         -F         skip forward strand\n");
 		fprintf(stderr, "         -R         skip reverse strand\n");
@@ -118,6 +119,7 @@ int main(int argc, char *argv[])
 		int i, j, l; \
 		itr = (itr_set); \
 		if (is_bin) { \
+			fwrite("RLE\6", 4, 1, fp); \
 			while ((s = itr_next_f(itr, &l)) != 0) \
 				fwrite(s, 1, l, fp); \
 		} else { \
