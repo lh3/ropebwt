@@ -258,7 +258,7 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end)
 	rsbucket_t *b, *k, *l, *be;
 
 	b = alloca(sizeof(rsbucket_t) * 8);
-	be = b + 7;
+	be = b + 8;
 	for (k = b; k != be; ++k) k->b = k->e = beg;
 	for (i = beg; i != end; ++i) ++b[(*i).v&7].e;
 	if (b[0].e == end) return; // no need to sort
@@ -329,13 +329,13 @@ void bcr_append(bcr_t *b, int len, uint8_t *seq)
 	++b->n_seqs;
 }
 
-static void set_bwt(bcr_t *bcr, pair64_t *a0, pair64_t *a1)
+static void set_bwt(bcr_t *bcr, pair64_t *a)
 {
-	int64_t k, c[6], i[6];
+	int64_t k, c[6];
 	int j, l;
 	memset(c, 0, 48);
 	for (k = 0; k < bcr->n_seqs; ++k) {
-		pair64_t *u = &a0[k];
+		pair64_t *u = &a[k];
 		u->u += c[u->v&7];
 		++c[u->v&7];
 	}
@@ -349,15 +349,10 @@ static void set_bwt(bcr_t *bcr, pair64_t *a0, pair64_t *a1)
 			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
 	memmove(c + 1, c, 40);
 	for (k = 1, c[0] = 0; k < 6; ++k) c[k] += c[k - 1];
-	for (k = 0; k < 6; ++k) {
-		i[k] = c[k], bcr->c[k] += c[k];
-		bcr->bwt[k].a = a1 + c[k];
-	}
-	for (k = 0; k < bcr->n_seqs; ++k) {
-		pair64_t *u = &a0[k];
-		u->u += c[u->v&7];
-		a1[i[u->v&7]++] = *u;
-	}
+	rs_classify_alt(a, a + bcr->n_seqs);
+	for (k = 0; k < 6; ++k)
+		bcr->c[k] += c[k], bcr->bwt[k].a = a + c[k];
+	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += c[a[k].v&7];
 }
 
 static void next_bwt(bcr_t *bcr, int class, int pos)
@@ -396,24 +391,22 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 void bcr_build(bcr_t *b)
 {
 	int64_t k;
-	int pos, c, curr = 0;
-	pair64_t *a[2];
+	int pos, c;
+	pair64_t *a;
 
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs);
-	a[0] = malloc(b->n_seqs * 16);
-	a[1] = malloc(b->n_seqs * 16);
-	assert(a[0] && a[1]);
-	for (k = 0; k < b->n_seqs; ++k) a[0][k].u = 0, a[0][k].v = k<<3;
-	for (pos = 0; pos <= b->max_len; ++pos, curr ^= 1) {
-		set_bwt(b, a[curr], a[curr^1]);
+	a = malloc(b->n_seqs * 16);
+	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<3;
+	for (pos = 0; pos <= b->max_len; ++pos) {
+		set_bwt(b, a);
 		if (pos) {
 			for (c = 1; c <= 4; ++c)
 				next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
 	}
-	free(a[0]); free(a[1]);
+	free(a);
 }
 
 typedef struct {
