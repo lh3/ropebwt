@@ -172,7 +172,7 @@ typedef struct {
 #define rstype_t pair64_t
 #define rskey(x) ((x).u)
 
-#define RS_MIN_SIZE 255
+#define RS_MIN_SIZE 32
 
 typedef struct {
 	rstype_t *b, *e;
@@ -187,29 +187,6 @@ static inline void rs_insertsort(rstype_t *s, rstype_t *t)
 			*j = *(j - 1);
 		*j = tmp;
 	}
-}
-
-void rs_combsort(size_t n, rstype_t a[])
-{
-	const double shrink_factor = 1. / 1.2473309501039786540366528676643;
-	int do_swap;
-	size_t gap = n;
-	rstype_t tmp, *i, *j;
-	do {
-		if (gap > 2) {
-			gap = (size_t)(gap * shrink_factor);
-			if (gap == 9 || gap == 10) gap = 11;
-		}
-		do_swap = 0;
-		for (i = a; i < a + n - gap; ++i) {
-			j = i + gap;
-			if (rskey(*j) < rskey(*i)) {
-				tmp = *i; *i = *j; *j = tmp;
-				do_swap = 1;
-			}
-		}
-	} while (do_swap || gap > 2);
-	if (gap != 1) rs_insertsort(a, a + n);
 }
 
 void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
@@ -247,7 +224,7 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 			for (i = 0; i != 1<<n_bits; ++i)
 				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
 		}
-	} else if (end - beg > 1) rs_combsort(end - beg, beg);
+	} else if (end - beg > 1) rs_insertsort(beg, end);
 }
 
 /******************************
