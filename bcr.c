@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <assert.h>
+#include <time.h>
 
 #ifndef kroundup32
 #define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
@@ -293,7 +294,8 @@ typedef struct {
 
 typedef struct {
 	struct bcr_s *bcr;
-	int class, pos, toproc;
+	int class, pos;
+	volatile int toproc;
 } worker_t;
 
 struct bcr_s {
@@ -305,8 +307,6 @@ struct bcr_s {
 #ifdef HAVE_PTHREAD
 	pthread_t *tid;
 	worker_t *w;
-	pthread_mutex_t lock;
-	pthread_cond_t cv;
 	volatile int proc_cnt;
 #endif
 };
@@ -414,13 +414,11 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 #ifdef HAVE_PTHREAD
 static int worker_aux(worker_t *w)
 {
-	pthread_mutex_lock(&w->bcr->lock);
-	while (!w->toproc)
-		pthread_cond_wait(&w->bcr->cv, &w->bcr->lock);
-	w->toproc = 0;
-	pthread_mutex_unlock(&w->bcr->lock);
+	struct timespec req, rem;
+	req.tv_sec = 0; req.tv_nsec = 1000000;
+	while (!__sync_bool_compare_and_swap(&w->toproc, 1, 0)) nanosleep(&req, &rem);
 	next_bwt(w->bcr, w->class, w->pos);
-	__sync_fetch_and_add(&w->bcr->proc_cnt, 1);
+	__sync_add_and_fetch(&w->bcr->proc_cnt, 1);
 	return (w->bcr->max_len == w->pos);
 }
 
@@ -435,8 +433,6 @@ bcr_t *bcr_init(int is_thr)
 #ifdef HAVE_PTHREAD
 	if (is_thr) {
 		b->n_threads = 4;
-		pthread_mutex_init(&b->lock, 0);
-		pthread_cond_init(&b->cv, 0);
 		b->tid = calloc(b->n_threads, sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
 		b->w = calloc(b->n_threads, sizeof(worker_t));
 		for (i = 0; i < b->n_threads; ++i) b->w[i].class = i + 1, b->w[i].bcr = b;
@@ -451,8 +447,6 @@ void bcr_destroy(bcr_t *b)
 	int i;
 #ifdef HAVE_PTHREAD
 	if (b->tid) for (i = 1; i < b->n_threads; ++i) pthread_join(b->tid[i], 0);
-	pthread_mutex_destroy(&b->lock);
-	pthread_cond_destroy(&b->cv);
 	free(b->tid); free(b->w);
 #endif
 	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
@@ -475,14 +469,13 @@ void bcr_build(bcr_t *b)
 		if (pos) {
 #if defined(HAVE_PTHREAD)
 			if (b->n_threads > 1) {
-				pthread_mutex_lock(&b->lock);
-				for (c = 0; c < b->n_threads; ++c)
-					b->w[c].toproc = 1, b->w[c].pos = pos;
-				b->proc_cnt = 0;
-				pthread_cond_broadcast(&b->cv);
-				pthread_mutex_unlock(&b->lock);
+				for (c = 0; c < b->n_threads; ++c) {
+					volatile int *p = &b->w[c].toproc;
+					b->w[c].pos = pos;
+					while (!__sync_bool_compare_and_swap(p, 0, 1));
+				}
 				worker_aux(&b->w[0]);
-				while (b->proc_cnt != b->n_threads);
+				while (!__sync_bool_compare_and_swap(&b->proc_cnt, b->n_threads, 0));
 			} else for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
 #else
 			for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
