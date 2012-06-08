@@ -237,9 +237,7 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 
 void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 {
-	if (end - beg < 2) { // already sorted
-		return;
-	} else if (end - beg > RS_MIN_SIZE) {
+	if (end - beg > RS_MIN_SIZE) {
 		rsbucket_t *b;
 		int i;
 		b = alloca(sizeof(rsbucket_t) * (1<<n_bits));
@@ -249,7 +247,7 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 			for (i = 0; i != 1<<n_bits; ++i)
 				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
 		}
-	} else rs_combsort(end - beg, beg);
+	} else if (end - beg > 1) rs_combsort(end - beg, beg);
 }
 
 /******************************
