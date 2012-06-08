@@ -185,37 +185,54 @@ static inline void rs_insertsort(rstype_t *s, rstype_t *t)
 		}
 }
 
+typedef struct {
+	rstype_t *b, *e;
+} rsbucket_t;
+
+void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
+{
+	rstype_t *i;
+	int size = 1<<n_bits, m = size - 1;
+	rsbucket_t *k, *l, *be;
+
+	be = b + size;
+	for (k = b; k != be; ++k) k->b = k->e = beg;
+	for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e;
+	if (b[0].e == end) return; // no need to sort
+	for (k = b + 1; k != be; ++k)
+		k->e += (k-1)->e - beg, k->b = (k-1)->e;
+	for (k = b; k != be;) {
+		rstype_t t[2];
+		int curr = 0;
+		if (k->b == k->e) { ++k; continue; }
+		l = b + (rskey(*k->b)>>s&m);
+		if (k == l) { ++k->b; continue; }
+		t[curr] = *k->b;
+		do {
+			t[!curr] = *l->b;
+			*l->b++ = t[curr];
+			curr = !curr;
+			l = b + (rskey(t[curr])>>s&m);
+		} while (l != k);
+		*k->b++ = t[curr];
+	}
+	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
+	b->b = beg;
+}
+
 void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 {
-	int j, size = 1<<n_bits, m = size - 1;
-	unsigned long c[size];
-	rstype_t *i, *b[size], *e[size];
-
-	for (j = 0; j < size; ++j) c[j] = 0;
-	for (i = beg; i != end; ++i) ++c[rskey(*i)>>s&m];
-	b[0] = e[0] = beg;
-	for (j = 1; j != size; ++j) b[j] = e[j] = b[j - 1] + c[j - 1];
-	for (i = beg, j = 0; i != end;) {
-		rstype_t tmp = *i, swap;
-		int x;
-		for (;;) {
-			x = rskey(tmp)>>s&m;
-			if (e[x] == i) break;
-			swap = tmp; tmp = *e[x]; *e[x]++ = swap;
+	if (end - beg > RS_MIN_SIZE) {
+		rsbucket_t *b;
+		int i;
+		b = (rsbucket_t*)alloca(sizeof(rsbucket_t) * (1<<n_bits));
+		rs_classify(beg, end, n_bits, s, b);
+		if (s) {
+			s = s > n_bits? s - n_bits : 0;
+			for (i = 0; i != 1<<n_bits; ++i)
+				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
 		}
-		*i++ = tmp;
-		++e[x];
-		while (j != size && i >= b[j]) ++j;
-		while (j != size && e[j-1] == b[j]) ++j;
-		if (i < e[j-1]) i = e[j-1];
-	}
-	if (s) {
-		s = s > n_bits? s - n_bits : 0;
-		for (j = 0; j < size; ++j) {
-			if (c[j] >= RS_MIN_SIZE) rs_sort(b[j], e[j], n_bits, s);
-			else if (c[j] >= 2) rs_insertsort(b[j], e[j]);
-		}
-	}
+	} else if (end - beg > 1) rs_insertsort(beg, end);
 }
 
 /******************************
