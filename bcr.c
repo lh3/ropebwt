@@ -242,14 +242,13 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 	} else if (end - beg > RS_MIN_SIZE) {
 		rsbucket_t *b;
 		int i;
-		b = malloc(sizeof(rsbucket_t) * (1<<n_bits));
+		b = alloca(sizeof(rsbucket_t) * (1<<n_bits));
 		rs_classify(beg, end, n_bits, s, b);
 		if (s) {
 			s = s > n_bits? s - n_bits : 0;
 			for (i = 0; i != 1<<n_bits; ++i)
 				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
 		}
-		free(b);
 	} else rs_combsort(end - beg, beg);
 }
 
