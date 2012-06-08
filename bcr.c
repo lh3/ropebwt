@@ -168,21 +168,16 @@ typedef struct {
 	uint64_t u, v; // $u: position; $v: seq_id:61, base:3
 } pair64_t;
 
-#define rsint_t uint64_t
 #define rstype_t pair64_t
 #define rskey(x) ((x).u)
 
 #define RS_MIN_SIZE 64
 
-typedef struct {
-	rstype_t *b, *e;
-} rsbucket_t;
-
 static inline void rs_insertsort(rstype_t *s, rstype_t *t)
 {
 	rstype_t *i;
 	for (i = s + 1; i < t; ++i)
-		if (*i < *(i - 1)) {
+		if (rskey(*i) < rskey(*(i - 1))) {
 			rstype_t *j, tmp = *i;
 			for (j = i; j > s && rskey(tmp) < rskey(*(j-1)); --j)
 				*j = *(j - 1);
@@ -190,41 +185,37 @@ static inline void rs_insertsort(rstype_t *s, rstype_t *t)
 		}
 }
 
-void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
-{
-	rstype_t *i, tmp;
-	int m = (1<<n_bits) - 1;
-	rsbucket_t *k, *l, *be;
-
-	be = b + (1<<n_bits);
-	for (k = b; k != be; ++k) k->b = k->e = beg;
-	for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e;
-	if (b[0].e == end) return; // no need to sort
-	for (k = b + 1; k != be; ++k)
-		k->e += (k-1)->e - beg, k->b = (k-1)->e;
-	for (k = b; k != be;) {
-		if (k->b == k->e) { ++k; continue; }
-		l = b + (rskey(*k->b)>>s&m);
-		if (k == l) { ++k->b; continue; }
-		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
-	}
-	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
-	b->b = beg;
-}
-
 void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 {
-	if (end - beg > RS_MIN_SIZE) {
-		rsbucket_t *b;
-		int i;
-		b = alloca(sizeof(rsbucket_t) * (1<<n_bits));
-		rs_classify(beg, end, n_bits, s, b);
-		if (s) {
-			s = s > n_bits? s - n_bits : 0;
-			for (i = 0; i != 1<<n_bits; ++i)
-				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
+	int j, size = 1<<n_bits, m = size - 1;
+	unsigned long c[size];
+	rstype_t *i, *b[size], *e[size];
+
+	for (j = 0; j < size; ++j) c[j] = 0;
+	for (i = beg; i != end; ++i) ++c[rskey(*i)>>s&m];
+	b[0] = e[0] = beg;
+	for (j = 1; j != size; ++j) b[j] = e[j] = b[j - 1] + c[j - 1];
+	for (i = beg, j = 0; i != end;) {
+		rstype_t tmp = *i, swap;
+		int x;
+		for (;;) {
+			x = rskey(tmp)>>s&m;
+			if (e[x] == i) break;
+			swap = tmp; tmp = *e[x]; *e[x]++ = swap;
 		}
-	} else if (end - beg > 1) rs_insertsort(beg, end);
+		*i++ = tmp;
+		++e[x];
+		while (j != size && i >= b[j]) ++j;
+		while (j != size && e[j-1] == b[j]) ++j;
+		if (i < e[j-1]) i = e[j-1];
+	}
+	if (s) {
+		s = s > n_bits? s - n_bits : 0;
+		for (j = 0; j < size; ++j) {
+			if (c[j] >= RS_MIN_SIZE) rs_sort(b[j], e[j], n_bits, s);
+			else if (c[j] >= 2) rs_insertsort(b[j], e[j]);
+		}
+	}
 }
 
 /******************************
@@ -233,22 +224,23 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 
 void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 {
-	rsbucket_t *b, *k, *l, *be;
-	b = alloca(sizeof(rsbucket_t) * 8);
-	be = b + 8;
-	for (k = b; k != be; ++k) k->b = beg + ac[k-b];
-	for (k = b; k != be - 1; ++k) k->e = (k+1)->b;
-	k->e = end;
-	for (k = b; k != be;) {
-		rstype_t tmp;
-		if (k->b == k->e) { ++k; continue; }
-		l = b + ((*k->b).v&7);
-		if (k == l) { ++k->b; continue; }
-//		while (b + ((*l->b).v&7) == l) ++l->b;
-		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
+	int j;
+	rstype_t *i, *b[8], *e[8];
+	for (j = 0; j != 8; ++j) b[j] = e[j] = beg + ac[j];
+	for (i = beg, j = 0; i != end;) {
+		rstype_t tmp = *i, swap;
+		int x;
+		for (;;) {
+			x = tmp.v&7;
+			if (e[x] == i) break;
+			swap = tmp; tmp = *e[x]; *e[x]++ = swap;
+		}
+		*i++ = tmp;
+		++e[x];
+		while (j != 8 && i >= b[j]) ++j;
+		while (j != 8 && e[j-1] == b[j]) ++j;
+		if (i < e[j-1]) i = e[j-1];
 	}
-	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
-	b->b = beg;
 }
 
 /***********
