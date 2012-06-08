@@ -172,7 +172,7 @@ typedef struct {
 #define rstype_t pair64_t
 #define rskey(x) ((x).u)
 
-#define RS_MIN_SIZE 32
+#define RS_MIN_SIZE 64
 
 typedef struct {
 	rstype_t *b, *e;
