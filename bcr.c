@@ -227,7 +227,7 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
-		while (b + (rskey(*l->b)>>s&m) == l) ++l->b;
+//		while (b + (rskey(*l->b)>>s&m) == l) ++l->b;
 		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
@@ -269,7 +269,7 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 		if (k->b == k->e) { ++k; continue; }
 		l = b + ((*k->b).v&7);
 		if (k == l) { ++k->b; continue; }
-		while (b + ((*l->b).v&7) == l) ++l->b;
+//		while (b + ((*l->b).v&7) == l) ++l->b;
 		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
