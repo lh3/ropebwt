@@ -213,7 +213,7 @@ void rs_combsort(size_t n, rstype_t a[])
 
 void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 {
-	rstype_t *i;
+	rstype_t *i, tmp;
 	int m = (1<<n_bits) - 1;
 	rsbucket_t *k, *l, *be;
 
@@ -224,22 +224,11 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
-		rstype_t tmp, *p[2];
-		int curr = 0;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
-		p[curr] = k->b; p[!curr] = &tmp;
-		do {
-			size_t tmp2 = l - b;
-			while ((rskey(*l->b)>>s&m) == tmp2) ++l->b;
-			*p[!curr] = *l->b;
-			*l->b = *p[curr];
-			curr = !curr;
-			l = b + (rskey(*p[curr])>>s&m);
-		} while (l != k);
-		if (curr) *k->b = tmp;
-		++k->b;
+		while (b + (rskey(*l->b)>>s&m) == l) ++l->b;
+		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
@@ -276,22 +265,12 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 	for (k = b; k != be - 1; ++k) k->e = (k+1)->b;
 	k->e = end;
 	for (k = b; k != be;) {
-		rstype_t tmp, *p[2];
-		int curr = 0;
+		rstype_t tmp;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + ((*k->b).v&7);
 		if (k == l) { ++k->b; continue; }
-		p[curr] = k->b; p[!curr] = &tmp;
-		do {
-			size_t tmp2 = l - b;
-			while (((*l->b).v&7) == tmp2) ++l->b;
-			*p[!curr] = *l->b;
-			*l->b = *p[curr];
-			curr = !curr;
-			l = b + (p[curr]->v&7);
-		} while (l != k);
-		if (curr) *k->b = tmp;
-		++k->b;
+		while (b + ((*l->b).v&7) == l) ++l->b;
+		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
 	b->b = beg;
