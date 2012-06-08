@@ -20,9 +20,7 @@ ropebwt:bprope6.o rbrope6.o bcr.o main-misc.o
 
 bprope6.o:bprope6.h
 rbrope6.o:rbrope6.h
-
-bcr.o:bcr.c bcr.h
-		$(CC) -c $(CFLAGS) $(DFLAGS) -DHAVE_PTHREAD $(INCLUDES) $< -o $@
+bcr.o:bcr.h
 
 rld.o:rld.c rld.h
 		$(CC) -c $(CFLAGS) $(DFLAGS) -D_DNA_ONLY -D_NO_UTILS_H rld.c -o $@

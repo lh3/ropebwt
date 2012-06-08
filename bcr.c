@@ -173,64 +173,47 @@ typedef struct {
 
 #define RS_MIN_SIZE 64
 
-static inline void rs_insertsort(rstype_t *s, rstype_t *t)
-{
-	rstype_t *i;
-	for (i = s + 1; i < t; ++i)
-		if (rskey(*i) < rskey(*(i - 1))) {
-			rstype_t *j, tmp = *i;
-			for (j = i; j > s && rskey(tmp) < rskey(*(j-1)); --j)
-				*j = *(j - 1);
-			*j = tmp;
-		}
-}
-
 typedef struct {
 	rstype_t *b, *e;
 } rsbucket_t;
 
-void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
+void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 {
 	rstype_t *i;
 	int size = 1<<n_bits, m = size - 1;
-	rsbucket_t *k, *be;
+	rsbucket_t *k, b[size], *be = b + size;
 
-	be = b + size;
 	for (k = b; k != be; ++k) k->b = k->e = beg;
 	for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e;
-	if (b[0].e == end) return; // no need to sort
 	for (k = b + 1; k != be; ++k)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
-		rstype_t t[2];
-		rsbucket_t *l;
-		int curr = 0;
-		if (k->b == k->e) { ++k; continue; }
-		l = b + (rskey(*k->b)>>s&m);
-		if (k == l) { ++k->b; continue; }
-		t[curr] = *k->b;
-		do {
-			t[!curr] = *l->b; *l->b++ = t[curr];
-			curr = !curr;
-			l = b + (rskey(t[curr])>>s&m);
-		} while (l != k);
-		*k->b++ = t[curr];
+		if (k->b != k->e) {
+			rsbucket_t *l;
+			if ((l = b + (rskey(*k->b)>>s&m)) != k) {
+				rstype_t tmp = *k->b, swap;
+				do {
+					swap = tmp; tmp = *l->b; *l->b++ = swap;
+					l = b + (rskey(tmp)>>s&m);
+				} while (l != k);
+				*k->b++ = tmp;
+			} else ++k->b;
+		} else ++k;
 	}
 	for (b->b = beg, k = b + 1; k != be; ++k) k->b = (k-1)->e;
-}
-
-void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
-{
-	if (end - beg > RS_MIN_SIZE) {
-		rsbucket_t b[1<<n_bits];
-		rs_classify(beg, end, n_bits, s, b);
-		if (s) {
-			int i;
-			s = s > n_bits? s - n_bits : 0;
-			for (i = 0; i != 1<<n_bits; ++i)
-				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
-		}
-	} else if (end - beg > 1) rs_insertsort(beg, end);
+	if (s) {
+		s = s > n_bits? s - n_bits : 0;
+		for (k = b; k != be; ++k)
+			if (k->e - k->b > RS_MIN_SIZE) rs_sort(k->b, k->e, n_bits, s);
+			else if (k->e - k->b > 1)
+				for (i = k->b + 1; i < k->e; ++i)
+					if (rskey(*i) < rskey(*(i - 1))) {
+						rstype_t *j, tmp = *i;
+						for (j = i; j > k->b && rskey(tmp) < rskey(*(j-1)); --j)
+							*j = *(j - 1);
+						*j = tmp;
+					}
+	}
 }
 
 /******************************
@@ -244,19 +227,17 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 	for (k = b; k != be - 1; ++k) k->e = k[1].b;
 	k->e = end;
 	for (k = b; k != be;) {
-		rstype_t t[2];
-		rsbucket_t *l;
-		int curr = 0;
-		if (k->b == k->e) { ++k; continue; }
-		l = b + ((*k->b).v&7);
-		if (k == l) { ++k->b; continue; }
-		t[curr] = *k->b;
-		do {
-			t[!curr] = *l->b; *l->b++ = t[curr];
-			curr = !curr;
-			l = b + (t[curr].v&7);
-		} while (l != k);
-		*k->b++ = t[curr];
+		if (k->b != k->e) {
+			rsbucket_t *l;
+			if ((l = b + ((*k->b).v&7)) != k) {
+				rstype_t tmp = *k->b, swap;
+				do {
+					swap = tmp; tmp = *l->b; *l->b++ = swap;
+					l = b + (tmp.v&7);
+				} while (l != k);
+				*k->b++ = tmp;
+			} else ++k->b;
+		} else ++k;
 	}
 }
 
@@ -264,9 +245,7 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
  *** BCR ***
  ***********/
 
-#ifdef HAVE_PTHREAD
 #include <pthread.h>
-#endif
 #include "bcr.h"
 
 typedef struct {
@@ -287,11 +266,10 @@ struct bcr_s {
 	uint16_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
-#ifdef HAVE_PTHREAD
+	// for multi-threading
 	pthread_t *tid;
 	worker_t *w;
 	volatile int proc_cnt;
-#endif
 };
 
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
@@ -394,7 +372,6 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_destroy(er);
 	bwt->e = ew;
 }
-#ifdef HAVE_PTHREAD
 static int worker_aux(worker_t *w)
 {
 	struct timespec req, rem;
@@ -406,14 +383,13 @@ static int worker_aux(worker_t *w)
 }
 
 static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
-#endif
+
 bcr_t *bcr_init(int is_thr)
 {
 	bcr_t *b;
 	int i;
 	b = calloc(1, sizeof(bcr_t));
 	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
-#ifdef HAVE_PTHREAD
 	if (is_thr) {
 		b->n_threads = 4;
 		b->tid = calloc(b->n_threads, sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
@@ -421,17 +397,14 @@ bcr_t *bcr_init(int is_thr)
 		for (i = 0; i < b->n_threads; ++i) b->w[i].class = i + 1, b->w[i].bcr = b;
 		for (i = 1; i < b->n_threads; ++i) pthread_create(&b->tid[i], 0, worker, &b->w[i]);
 	}
-#endif
 	return b;
 }
 
 void bcr_destroy(bcr_t *b)
 {
 	int i;
-#ifdef HAVE_PTHREAD
 	if (b->tid) for (i = 1; i < b->n_threads; ++i) pthread_join(b->tid[i], 0);
 	free(b->tid); free(b->w);
-#endif
 	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
 	free(b->len); free(b->seq);
 	free(b);
@@ -450,7 +423,6 @@ void bcr_build(bcr_t *b)
 	for (pos = 0; pos <= b->max_len; ++pos) {
 		a = set_bwt(b, a, pos);
 		if (pos) {
-#if defined(HAVE_PTHREAD)
 			if (b->n_threads > 1) {
 				for (c = 0; c < b->n_threads; ++c) {
 					volatile int *p = &b->w[c].toproc;
@@ -460,9 +432,6 @@ void bcr_build(bcr_t *b)
 				worker_aux(&b->w[0]);
 				while (!__sync_bool_compare_and_swap(&b->proc_cnt, b->n_threads, 0));
 			} else for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
-#else
-			for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
-#endif
 		} else next_bwt(b, 0, pos);
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
 	}
