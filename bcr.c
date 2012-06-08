@@ -193,7 +193,7 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 {
 	rstype_t *i;
 	int size = 1<<n_bits, m = size - 1;
-	rsbucket_t *k, *l, *be;
+	rsbucket_t *k, *be;
 
 	be = b + size;
 	for (k = b; k != be; ++k) k->b = k->e = beg;
@@ -203,31 +203,29 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
 	for (k = b; k != be;) {
 		rstype_t t[2];
+		rsbucket_t *l;
 		int curr = 0;
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
 		t[curr] = *k->b;
 		do {
-			t[!curr] = *l->b;
-			*l->b++ = t[curr];
+			t[!curr] = *l->b; *l->b++ = t[curr];
 			curr = !curr;
 			l = b + (rskey(t[curr])>>s&m);
 		} while (l != k);
 		*k->b++ = t[curr];
 	}
-	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
-	b->b = beg;
+	for (b->b = beg, k = b + 1; k != be; ++k) k->b = (k-1)->e;
 }
 
 void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 {
 	if (end - beg > RS_MIN_SIZE) {
-		rsbucket_t *b;
-		int i;
-		b = (rsbucket_t*)alloca(sizeof(rsbucket_t) * (1<<n_bits));
+		rsbucket_t b[1<<n_bits];
 		rs_classify(beg, end, n_bits, s, b);
 		if (s) {
+			int i;
 			s = s > n_bits? s - n_bits : 0;
 			for (i = 0; i != 1<<n_bits; ++i)
 				if (b[i].e > b[i].b + 1) rs_sort(b[i].b, b[i].e, n_bits, s);
@@ -241,22 +239,24 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 
 void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 {
-	int j;
-	rstype_t *i, *b[8], *e[8];
-	for (j = 0; j != 8; ++j) b[j] = e[j] = beg + ac[j];
-	for (i = beg, j = 0; i != end;) {
-		rstype_t tmp = *i, swap;
-		int x;
-		for (;;) {
-			x = tmp.v&7;
-			if (e[x] == i) break;
-			swap = tmp; tmp = *e[x]; *e[x]++ = swap;
-		}
-		*i++ = tmp;
-		++e[x];
-		while (j != 8 && i >= b[j]) ++j;
-		while (j != 8 && e[j-1] == b[j]) ++j;
-		if (i < e[j-1]) i = e[j-1];
+	rsbucket_t *k, b[8], *be = b + 8;
+	for (k = b; k != be; ++k) k->b = beg + ac[k - b];
+	for (k = b; k != be - 1; ++k) k->e = k[1].b;
+	k->e = end;
+	for (k = b; k != be;) {
+		rstype_t t[2];
+		rsbucket_t *l;
+		int curr = 0;
+		if (k->b == k->e) { ++k; continue; }
+		l = b + ((*k->b).v&7);
+		if (k == l) { ++k->b; continue; }
+		t[curr] = *k->b;
+		do {
+			t[!curr] = *l->b; *l->b++ = t[curr];
+			curr = !curr;
+			l = b + (t[curr].v&7);
+		} while (l != k);
+		*k->b++ = t[curr];
 	}
 }
 
