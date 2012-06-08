@@ -181,12 +181,13 @@ typedef struct {
 static inline void rs_insertsort(rstype_t *s, rstype_t *t)
 {
 	rstype_t *i;
-	for (i = s + 1; i < t; ++i) {
-		rstype_t *j, tmp = *i;
-		for (j = i; j > s && rskey(tmp) < rskey(*(j-1)); --j)
-			*j = *(j - 1);
-		*j = tmp;
-	}
+	for (i = s + 1; i < t; ++i)
+		if (*i < *(i - 1)) {
+			rstype_t *j, tmp = *i;
+			for (j = i; j > s && rskey(tmp) < rskey(*(j-1)); --j)
+				*j = *(j - 1);
+			*j = tmp;
+		}
 }
 
 void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
@@ -205,7 +206,6 @@ void rs_classify(rstype_t *beg, rstype_t *end, int n_bits, int s, rsbucket_t *b)
 		if (k->b == k->e) { ++k; continue; }
 		l = b + (rskey(*k->b)>>s&m);
 		if (k == l) { ++k->b; continue; }
-//		while (b + (rskey(*l->b)>>s&m) == l) ++l->b;
 		tmp = *l->b; *l->b++ = *k->b; *k->b = tmp;
 	}
 	for (k = b + 1; k != be; ++k) k->b = (k-1)->e;
