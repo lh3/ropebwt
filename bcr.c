@@ -184,15 +184,15 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 	rsbucket_t *k, b[size], *be = b + size;
 
 	for (k = b; k != be; ++k) k->b = k->e = beg;
-	for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e;
-	for (k = b + 1; k != be; ++k)
+	for (i = beg; i != end; ++i) ++b[rskey(*i)>>s&m].e; // count radix
+	for (k = b + 1; k != be; ++k) // set start and end of each bucket
 		k->e += (k-1)->e - beg, k->b = (k-1)->e;
-	for (k = b; k != be;) {
-		if (k->b != k->e) {
+	for (k = b; k != be;) { // in-place classification based on radix
+		if (k->b != k->e) { // the bucket is not full
 			rsbucket_t *l;
-			if ((l = b + (rskey(*k->b)>>s&m)) != k) {
+			if ((l = b + (rskey(*k->b)>>s&m)) != k) { // destination different
 				rstype_t tmp = *k->b, swap;
-				do {
+				do { // swap until we find an element in $k
 					swap = tmp; tmp = *l->b; *l->b++ = swap;
 					l = b + (rskey(tmp)>>s&m);
 				} while (l != k);
@@ -200,12 +200,12 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 			} else ++k->b;
 		} else ++k;
 	}
-	for (b->b = beg, k = b + 1; k != be; ++k) k->b = (k-1)->e;
-	if (s) {
+	for (b->b = beg, k = b + 1; k != be; ++k) k->b = (k-1)->e; // reset k->b
+	if (s) { // if $s is non-zero, we need to sort buckets
 		s = s > n_bits? s - n_bits : 0;
 		for (k = b; k != be; ++k)
 			if (k->e - k->b > RS_MIN_SIZE) rs_sort(k->b, k->e, n_bits, s);
-			else if (k->e - k->b > 1)
+			else if (k->e - k->b > 1) // then use an insertion sort
 				for (i = k->b + 1; i < k->e; ++i)
 					if (rskey(*i) < rskey(*(i - 1))) {
 						rstype_t *j, tmp = *i;
