@@ -482,9 +482,6 @@ void bcr_build(bcr_t *b)
 	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs * 2);
-	a = malloc(b->n_seqs * 16);
-	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3;
-	free(b->len); b->len = 0;
 	if (b->tmpfn) {
 		tmpfp = fopen(b->tmpfn, "wb");
 		for (pos = 0; pos < b->max_len; ++pos) {
@@ -496,6 +493,9 @@ void bcr_build(bcr_t *b)
 		bcr_gettime(&rt, &ct);
 		if (bcr_verbose >= 3) fprintf(stderr, "Saved sequences to the temporary file (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	}
+	a = malloc(b->n_seqs * 16);
+	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3;
+	free(b->len); b->len = 0;
 	for (pos = 0; pos <= b->max_len; ++pos) {
 		a = set_bwt(b, a, pos);
 		if (pos != b->max_len && tmpfp) b->seq[pos] = ld_restore(tmpfp);
