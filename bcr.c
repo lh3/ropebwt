@@ -241,6 +241,28 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 	}
 }
 
+/************************
+ *** System utilities ***
+ ************************/
+
+#include <sys/time.h>
+#include <sys/resource.h>
+
+static double cputime()
+{
+	struct rusage r;
+	getrusage(RUSAGE_SELF, &r);
+	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
+}
+
+static double realtime()
+{
+	struct timeval tp;
+	struct timezone tzp;
+	gettimeofday(&tp, &tzp);
+	return tp.tv_sec + tp.tv_usec * 1e-6;
+}
+
 /***********
  *** BCR ***
  ***********/
@@ -352,7 +374,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	for (k = 0; k < bwt->n; ++k) {
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class];
-		u->v = (u->v&~7ULL) | (pos >= bcr->len[u->v>>3]? 0 : ld_get(bcr->seq[pos], u->v>>3) + 1);
+		u->v = (u->v&~7ULL) | (pos >= (u->v>>3&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>19) + 1);
 	}
 	ew = rll_init();
 	rll_itr_init(er, &ir);
@@ -419,7 +441,8 @@ void bcr_build(bcr_t *b)
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs * 2);
 	a = malloc(b->n_seqs * 16);
-	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<3;
+	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3;
+	free(b->len); b->len = 0;
 	for (pos = 0; pos <= b->max_len; ++pos) {
 		a = set_bwt(b, a, pos);
 		if (pos) {
