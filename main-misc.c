@@ -35,12 +35,13 @@ int main(int argc, char *argv[])
 	bcr_t *bcr = 0;
 	gzFile fp;
 	FILE *out = stdout;
+	char *tmpfn = 0;
 	kseq_t *ks;
 	enum algo_e algo = BPR;
 	int c, i, max_runs = 512, max_nodes = 64;
 	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD;
 
-	while ((c = getopt(argc, argv, "TFRObo:r:n:ta:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObo:r:n:ta:f:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -55,6 +56,7 @@ int main(int argc, char *argv[])
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
 		else if (c == 't') flag |= FLAG_THR;
+		else if (c == 'f') tmpfn = optarg;
 
 	if (optind == argc) {
 		fprintf(stderr, "\n");
@@ -63,6 +65,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "         -r INT     max number of runs in leaves (bpr and rbr only) [%d]\n", max_runs);
 		fprintf(stderr, "         -n INT     max number children per internal node (bpr only) [%d]\n", max_nodes);
 		fprintf(stderr, "         -o FILE    output file [stdout]\n");
+		fprintf(stderr, "         -f FILE    temporary sequence file name (bcr only) [null]\n");
 		fprintf(stderr, "         -b         binary output (5+3 runs starting after 4 bytes)\n");
 		fprintf(stderr, "         -t         enable threading (bcr only)\n");
 		fprintf(stderr, "         -F         skip forward strand\n");
@@ -73,7 +76,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (algo == BCR) {
-		bcr = bcr_init(flag&FLAG_THR);
+		bcr = bcr_init(flag&FLAG_THR, tmpfn);
 		fprintf(stderr, "[W::%s] with bcr, an ambiguous base will be converted to a random base\n", __func__);
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);

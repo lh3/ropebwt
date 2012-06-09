@@ -13,7 +13,7 @@ typedef struct bcritr_s bcritr_t;
 extern "C" {
 #endif
 
-	bcr_t *bcr_init(int is_thr);
+	bcr_t *bcr_init(int is_thr, const char *tmpfn);
 	void bcr_destroy(bcr_t *b);
 	void bcr_append(bcr_t *b, int len, uint8_t *seq);
 	void bcr_build(bcr_t *b);

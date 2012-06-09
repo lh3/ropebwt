@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <assert.h>
+#include <unistd.h>
 #include <time.h>
 
 #ifndef kroundup32
@@ -148,7 +149,7 @@ inline void ld_set(longdna_t *h, int64_t x, int c)
 		int j, old_max = h->max;
 		h->max = k + 1;
 		kroundup32(h->max);
-		h->a = realloc(h->a, sizeof(longdna_t) * h->max);
+		h->a = realloc(h->a, sizeof(void*) * h->max);
 		for (j = old_max; j < h->max; ++j) h->a[j] = 0;
 	}
 	if (h->a[k] == 0) h->a[k] = calloc(1<<LD_SHIFT>>5, 8);
@@ -158,6 +159,35 @@ inline void ld_set(longdna_t *h, int64_t x, int c)
 inline int ld_get(longdna_t *h, int64_t x)
 {
 	return h->a[x>>LD_SHIFT][(x&LD_MASK)>>5]>>((x&31)<<1)&3;
+}
+
+void ld_dump(const longdna_t *ld, FILE *fp)
+{
+	int i, x, zero = 0;
+	fwrite(&ld->max, sizeof(int), 1, fp);
+	for (i = 0; i < ld->max; ++i)
+		if (ld->a[i]) {
+			x = 1<<LD_SHIFT>>5;
+			fwrite(&x, sizeof(int), 1, fp);
+			fwrite(ld->a[i], 8, 1<<LD_SHIFT>>5, fp);
+		} else fwrite(&zero, sizeof(int), 1, fp);
+}
+
+longdna_t *ld_restore(FILE *fp)
+{
+	longdna_t *ld;
+	int i, x;
+	ld = calloc(1, sizeof(longdna_t));
+	fread(&ld->max, sizeof(int), 1, fp);
+	ld->a = calloc(ld->max, sizeof(void*));
+	for (i = 0; i < ld->max; ++i) {
+		fread(&x, sizeof(int), 1, fp);
+		if (x) {
+			ld->a[i] = malloc(x *8);
+			fread(ld->a[i], 8, x, fp);
+		}
+	}
+	return ld;
 }
 
 /******************
@@ -288,6 +318,7 @@ struct bcr_s {
 	uint16_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
+	char *tmpfn;
 	// for multi-threading
 	pthread_t *tid;
 	worker_t *w;
@@ -345,16 +376,7 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
 	memmove(c + 1, c, 40);
 	for (k = 1, c[0] = 0; k < 8; ++k) c[k] += c[k - 1]; // NB: MUST BE "8"; otherwise rs_classify_alt() will fail
-#if 0
-	pair64_t *tmp = malloc(sizeof(pair64_t) * bcr->n_seqs);
-	int64_t i[6];
-	for (j = 0; j < 6; ++j) i[j] = c[j];
-	for (k = 0; k < bcr->n_seqs; ++k)
-		tmp[i[a[k].v&7]++] = a[k];
-	free(a); a = tmp;
-#else
 	rs_classify_alt(a, a + bcr->n_seqs, c);
-#endif
 	for (j = 0; j < 6; ++j)
 		bcr->c[j] += c[j], bcr->bwt[j].a = a + c[j];
 	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += c[a[k].v&7];
@@ -406,7 +428,7 @@ static int worker_aux(worker_t *w)
 
 static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
 
-bcr_t *bcr_init(int is_thr)
+bcr_t *bcr_init(int is_thr, const char *tmpfn)
 {
 	bcr_t *b;
 	int i;
@@ -419,6 +441,7 @@ bcr_t *bcr_init(int is_thr)
 		for (i = 0; i < b->n_threads; ++i) b->w[i].class = i + 1, b->w[i].bcr = b;
 		for (i = 1; i < b->n_threads; ++i) pthread_create(&b->tid[i], 0, worker, &b->w[i]);
 	}
+	if (tmpfn) b->tmpfn = strdup(tmpfn);
 	return b;
 }
 
@@ -428,7 +451,7 @@ void bcr_destroy(bcr_t *b)
 	if (b->tid) for (i = 1; i < b->n_threads; ++i) pthread_join(b->tid[i], 0);
 	free(b->tid); free(b->w);
 	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
-	free(b->len); free(b->seq);
+	free(b->len); free(b->seq); free(b->tmpfn);
 	free(b);
 }
 
@@ -437,14 +460,25 @@ void bcr_build(bcr_t *b)
 	int64_t k;
 	int pos, c;
 	pair64_t *a;
+	FILE *tmpfp = 0;
 
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs * 2);
 	a = malloc(b->n_seqs * 16);
 	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3;
 	free(b->len); b->len = 0;
+	if (b->tmpfn) {
+		tmpfp = fopen(b->tmpfn, "wb");
+		for (pos = 0; pos < b->max_len; ++pos) {
+			ld_dump(b->seq[pos], tmpfp);
+			ld_destroy(b->seq[pos]);
+		}
+		fclose(tmpfp);
+		tmpfp = fopen(b->tmpfn, "rb");
+	}
 	for (pos = 0; pos <= b->max_len; ++pos) {
 		a = set_bwt(b, a, pos);
+		if (pos != b->max_len && tmpfp) b->seq[pos] = ld_restore(tmpfp);
 		if (pos) {
 			if (b->n_threads > 1) {
 				for (c = 0; c < b->n_threads; ++c) {
@@ -459,7 +493,15 @@ void bcr_build(bcr_t *b)
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
 	}
 	free(a);
+	if (tmpfp) {
+		fclose(tmpfp);
+		unlink(b->tmpfn);
+	}
 }
+
+/****************
+ *** Iterator ***
+ ****************/
 
 struct bcritr_s {
 	const bcr_t *b;
