@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <time.h>
 
+int bcr_verbose = 2;
+
 #ifndef kroundup32
 #define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
 #endif
@@ -278,19 +280,15 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
 #include <sys/time.h>
 #include <sys/resource.h>
 
-static double cputime()
+static void bcr_gettime(double *rt, double *ct)
 {
 	struct rusage r;
-	getrusage(RUSAGE_SELF, &r);
-	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
-}
-
-static double realtime()
-{
 	struct timeval tp;
 	struct timezone tzp;
+	getrusage(RUSAGE_SELF, &r);
 	gettimeofday(&tp, &tzp);
-	return tp.tv_sec + tp.tv_usec * 1e-6;
+	*ct = r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
+	*rt = tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
 /***********
@@ -323,7 +321,23 @@ struct bcr_s {
 	pthread_t *tid;
 	worker_t *w;
 	volatile int proc_cnt;
+	// for stats
+	double rt0, ct0;
 };
+
+typedef struct {
+	double rt, ct;
+	size_t mem;
+} bcrstat_t;
+
+size_t bcr_bwtmem(const bcr_t *b)
+{
+	int i;
+	size_t mem = 0;
+	for (i = 0; i < 6; ++i)
+		mem += b->bwt[i].e->n * RLL_BLOCK_SIZE;
+	return mem;
+}
 
 void bcr_append(bcr_t *b, int len, uint8_t *seq)
 {
@@ -433,6 +447,7 @@ bcr_t *bcr_init(int is_thr, const char *tmpfn)
 	bcr_t *b;
 	int i;
 	b = calloc(1, sizeof(bcr_t));
+	bcr_gettime(&b->rt0, &b->ct0);
 	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
 	if (is_thr) {
 		b->n_threads = 4;
@@ -461,7 +476,10 @@ void bcr_build(bcr_t *b)
 	int pos, c;
 	pair64_t *a;
 	FILE *tmpfp = 0;
+	double ct, rt;
 
+	bcr_gettime(&rt, &ct);
+	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs * 2);
 	a = malloc(b->n_seqs * 16);
@@ -475,6 +493,8 @@ void bcr_build(bcr_t *b)
 		}
 		fclose(tmpfp);
 		tmpfp = fopen(b->tmpfn, "rb");
+		bcr_gettime(&rt, &ct);
+		if (bcr_verbose >= 3) fprintf(stderr, "Saved sequences to the temporary file (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	}
 	for (pos = 0; pos <= b->max_len; ++pos) {
 		a = set_bwt(b, a, pos);
@@ -491,6 +511,8 @@ void bcr_build(bcr_t *b)
 			} else for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
+		bcr_gettime(&rt, &ct);
+		if (bcr_verbose >= 3) fprintf(stderr, "Finished cycle %d (%.3fs, %.3fs, %.3fM)\n", pos, rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	}
 	free(a);
 	if (tmpfp) {

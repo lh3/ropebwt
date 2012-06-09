@@ -9,6 +9,8 @@ typedef struct bcr_s bcr_t;
 struct bcritr_s;
 typedef struct bcritr_s bcritr_t;
 
+extern int bcr_verbose;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
