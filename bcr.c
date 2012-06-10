@@ -335,7 +335,7 @@ size_t bcr_bwtmem(const bcr_t *b)
 	int i;
 	size_t mem = 0;
 	for (i = 0; i < 6; ++i)
-		mem += b->bwt[i].e->n * RLL_BLOCK_SIZE;
+		mem += (size_t)b->bwt[i].e->n * RLL_BLOCK_SIZE;
 	return mem;
 }
 
