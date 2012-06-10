@@ -377,6 +377,7 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 			if (m == k) ++m;
 			else a[m++] = a[k];
 		}
+		if (bcr->n_seqs < m) a = realloc(a, m * sizeof(pair64_t));
 		bcr->n_seqs = m;
 	}
 	bcr->tot += bcr->n_seqs;

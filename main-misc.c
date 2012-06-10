@@ -27,6 +27,7 @@ enum algo_e { BPR, RBR, BCR };
 #define FLAG_BIN 0x8
 #define FLAG_TREE 0x10
 #define FLAG_THR 0x20
+#define FLAG_NON 0x40
 
 int main(int argc, char *argv[])
 {
@@ -41,7 +42,7 @@ int main(int argc, char *argv[])
 	int c, i, max_runs = 512, max_nodes = 64;
 	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD;
 
-	while ((c = getopt(argc, argv, "TFRObo:r:n:ta:f:v:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObNo:r:n:ta:f:v:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -50,12 +51,13 @@ int main(int argc, char *argv[])
 		} else if (c == 'o') out = fopen(optarg, "wb");
 		else if (c == 'F') flag &= ~FLAG_FOR;
 		else if (c == 'R') flag &= ~FLAG_REV;
+		else if (c == 'O') flag &= ~FLAG_ODD;
 		else if (c == 'T') flag |= FLAG_TREE;
 		else if (c == 'b') flag |= FLAG_BIN;
-		else if (c == 'O') flag &= ~FLAG_ODD;
+		else if (c == 'N') flag |= FLAG_NON;
+		else if (c == 't') flag |= FLAG_THR;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
-		else if (c == 't') flag |= FLAG_THR;
 		else if (c == 'f') tmpfn = optarg;
 		else if (c == 'v') bcr_verbose = atoi(optarg);
 
@@ -72,14 +74,15 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "         -t         enable threading (bcr only)\n");
 		fprintf(stderr, "         -F         skip forward strand\n");
 		fprintf(stderr, "         -R         skip reverse strand\n");
+		fprintf(stderr, "         -N         discard reads containing ambiguous bases\n");
 		fprintf(stderr, "         -O         suppress end trimming when forward==reverse\n");
 		fprintf(stderr, "         -T         print the tree stdout (bpr and rbr only)\n\n");
 		return 1;
 	}
 
-	if (algo == BCR) {
+	if (algo == BCR && !(flag&FLAG_NON)) {
 		bcr = bcr_init(flag&FLAG_THR, tmpfn);
-		fprintf(stderr, "[W::%s] with bcr, an ambiguous base will be converted to a random base\n", __func__);
+		fprintf(stderr, "Warning: With bcr, an ambiguous base will be converted to a random base\n");
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);
 	fp = gzopen(argv[optind], "rb");
@@ -89,7 +92,10 @@ int main(int argc, char *argv[])
 		uint8_t *s = (uint8_t*)ks->seq.s;
 		for (i = 0; i < l; ++i)
 			s[i] = s[i] < 128? seq_nt6_table[s[i]] : 5;
-		if (algo == BCR)
+		if (flag & FLAG_NON) {
+			for (i = 0; i < l; ++i) if (s[i] == 5) break;
+			if (i != l) continue;
+		} else if (algo == BCR)
 			for (i = 0; i < l; ++i)
 				if (s[i] == 5) s[i] = (lrand48()&3) + 1;
 		if ((flag & FLAG_ODD) && (l&1) == 0) { // then check reverse complement
