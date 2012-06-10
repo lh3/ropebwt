@@ -80,9 +80,9 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (algo == BCR && !(flag&FLAG_NON)) {
+	if (algo == BCR) {
 		bcr = bcr_init(flag&FLAG_THR, tmpfn);
-		fprintf(stderr, "Warning: With bcr, an ambiguous base will be converted to a random base\n");
+		if (!(flag&FLAG_NON)) fprintf(stderr, "Warning: With bcr, an ambiguous base will be converted to a random base\n");
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);
 	fp = gzopen(argv[optind], "rb");
