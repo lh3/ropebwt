@@ -316,19 +316,35 @@ struct bcr_s {
 	uint16_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
-	char *tmpfn;
-	// for multi-threading
-	pthread_t *tid;
-	worker_t *w;
-	volatile int proc_cnt;
-	// for stats
-	double rt0, ct0;
+	char *tmpfn; // temporary file name
+	volatile int proc_cnt; // for multi-threading
+	double rt0, ct0; // for timing
 };
 
 typedef struct {
 	double rt, ct;
 	size_t mem;
 } bcrstat_t;
+
+bcr_t *bcr_init(int is_thr, const char *tmpfn)
+{
+	bcr_t *b;
+	int i;
+	b = calloc(1, sizeof(bcr_t));
+	bcr_gettime(&b->rt0, &b->ct0);
+	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
+	b->n_threads = is_thr? 4 : 0;
+	if (tmpfn) b->tmpfn = strdup(tmpfn);
+	return b;
+}
+
+void bcr_destroy(bcr_t *b)
+{
+	int i;
+	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
+	free(b->len); free(b->seq); free(b->tmpfn);
+	free(b);
+}
 
 size_t bcr_bwtmem(const bcr_t *b)
 {
@@ -443,41 +459,15 @@ static int worker_aux(worker_t *w)
 
 static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
 
-bcr_t *bcr_init(int is_thr, const char *tmpfn)
-{
-	bcr_t *b;
-	int i;
-	b = calloc(1, sizeof(bcr_t));
-	bcr_gettime(&b->rt0, &b->ct0);
-	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
-	if (is_thr) {
-		b->n_threads = 4;
-		b->tid = calloc(b->n_threads, sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
-		b->w = calloc(b->n_threads, sizeof(worker_t));
-		for (i = 0; i < b->n_threads; ++i) b->w[i].class = i + 1, b->w[i].bcr = b;
-		for (i = 1; i < b->n_threads; ++i) pthread_create(&b->tid[i], 0, worker, &b->w[i]);
-	}
-	if (tmpfn) b->tmpfn = strdup(tmpfn);
-	return b;
-}
-
-void bcr_destroy(bcr_t *b)
-{
-	int i;
-	if (b->tid) for (i = 1; i < b->n_threads; ++i) pthread_join(b->tid[i], 0);
-	free(b->tid); free(b->w);
-	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
-	free(b->len); free(b->seq); free(b->tmpfn);
-	free(b);
-}
-
 void bcr_build(bcr_t *b)
 {
 	int64_t k;
-	int pos, c;
+	int pos, c, i;
 	pair64_t *a;
 	FILE *tmpfp = 0;
 	double ct, rt;
+	pthread_t *tid = 0;
+	worker_t *w = 0;
 
 	bcr_gettime(&rt, &ct);
 	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
@@ -494,6 +484,13 @@ void bcr_build(bcr_t *b)
 		bcr_gettime(&rt, &ct);
 		if (bcr_verbose >= 3) fprintf(stderr, "Saved sequences to the temporary file (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	}
+	if (b->n_threads > 1) {
+		tid = alloca(b->n_threads * sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
+		w = alloca(b->n_threads * sizeof(worker_t));
+		memset(w, 0, b->n_threads * sizeof(worker_t));
+		for (i = 0; i < b->n_threads; ++i) w[i].class = i + 1, w[i].bcr = b;
+		for (i = 1; i < b->n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
+	}
 	a = malloc(b->n_seqs * 16);
 	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3;
 	free(b->len); b->len = 0;
@@ -503,11 +500,11 @@ void bcr_build(bcr_t *b)
 		if (pos) {
 			if (b->n_threads > 1) {
 				for (c = 0; c < b->n_threads; ++c) {
-					volatile int *p = &b->w[c].toproc;
-					b->w[c].pos = pos;
+					volatile int *p = &w[c].toproc;
+					w[c].pos = pos;
 					while (!__sync_bool_compare_and_swap(p, 0, 1));
 				}
-				worker_aux(&b->w[0]);
+				worker_aux(&w[0]);
 				while (!__sync_bool_compare_and_swap(&b->proc_cnt, b->n_threads, 0));
 			} else for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
@@ -520,6 +517,7 @@ void bcr_build(bcr_t *b)
 		fclose(tmpfp);
 		unlink(b->tmpfn);
 	}
+	for (i = 1; i < b->n_threads; ++i) pthread_join(tid[i], 0);
 }
 
 /****************
