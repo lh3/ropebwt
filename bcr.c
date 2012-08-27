@@ -384,13 +384,13 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	if (pos == 0) {
 		for (k = 0; k < bcr->n_seqs; ++k) {
 			pair64_t *u = &a[k];
-			u->u += c[u->v&7], ++c[u->v&7];
+			u->u += c[u->v&7]++;
 		}
 	} else {
 		for (k = m = 0; k < bcr->n_seqs; ++k) {
 			pair64_t *u = &a[k];
 			if ((u->v&7) == 0) continue;
-			u->u += c[u->v&7], ++c[u->v&7];
+			u->u += c[u->v&7]++;
 			if (m == k) ++m;
 			else a[m++] = a[k];
 		}
@@ -401,7 +401,6 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].v&7];
 	// classify into each bucket
 	rs_classify_alt(a, a + bcr->n_seqs, ac); // This is a bottleneck.
-	// set the start of the bucket array
 	for (j = 0; j < 6; ++j) bcr->bwt[j].a = a + ac[j];
 	// update counts: $bcr->bwt[j].c[l] equals the number of symbol $l prior to bucket $j; needed by next_bwt()
 	for (l = 0; l < 6; ++l)
