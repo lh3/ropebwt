@@ -197,7 +197,7 @@ longdna_t *ld_restore(FILE *fp)
  ******************/
 
 typedef struct {
-	uint64_t u, v; // $u: position; $v: seq_id:61, base:3
+	uint64_t u, v; // $u: position in partial BWT; $v: seq_id:45, seq_len:16, base:3
 } pair64_t;
 
 #define rstype_t pair64_t
@@ -252,7 +252,7 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
  *** Classify pair64_t::v&7 ***
  ******************************/
 
-void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac)
+void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac) // very similar to the first half of rs_sort()
 {
 	rsbucket_t *k, b[8], *be = b + 8;
 	for (k = b; k != be; ++k) k->b = beg + ac[k - b];
@@ -355,7 +355,7 @@ size_t bcr_bwtmem(const bcr_t *b)
 	return mem;
 }
 
-void bcr_append(bcr_t *b, int len, const uint8_t *seq)
+void bcr_append(bcr_t *b, int len, const uint8_t *seq) // add a sequence
 {
 	int i;
 	assert(len >= 1 && len < 65536);
@@ -377,8 +377,9 @@ void bcr_append(bcr_t *b, int len, const uint8_t *seq)
 
 static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 {
-	int64_t k, c[8], m;
+	int64_t k, c[8], ac[8], m;
 	int j, l;
+	// compute the absolute position in the new BWT
 	memset(c, 0, 64);
 	if (pos == 0) {
 		for (k = 0; k < bcr->n_seqs; ++k) {
@@ -393,24 +394,21 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 			if (m == k) ++m;
 			else a[m++] = a[k];
 		}
-		if (bcr->n_seqs < m) a = realloc(a, m * sizeof(pair64_t));
+		// if (bcr->n_seqs > m) a = realloc(a, m * sizeof(pair64_t)); // FIXME: should be "<" instead of ">"
 		bcr->n_seqs = m;
 	}
+	for (k = 1, ac[0] = 0; k < 8; ++k) ac[k] = ac[k - 1] + c[k - 1]; // accumulative counts; NB: MUST BE "8"; otherwise rs_classify_alt() will fail
+	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].v&7];
+	// classify into each bucket
+	rs_classify_alt(a, a + bcr->n_seqs, ac); // This is a bottleneck.
+	// set the start of the bucket array
+	for (j = 0; j < 6; ++j) bcr->bwt[j].a = a + ac[j];
+	// update counts: $bcr->bwt[j].c[l] equals the number of symbol $l prior to bucket $j; needed by next_bwt()
+	for (l = 0; l < 6; ++l)
+		for (j = 1, bcr->bwt[0].c[l] = 0; j < 6; ++j)
+			bcr->bwt[j].c[l] = bcr->bwt[j-1].c[l] + bcr->bwt[j-1].e->mc[l];
+	for (j = 0; j < 6; ++j) bcr->bwt[j].n = c[j], bcr->c[j] += ac[j];
 	bcr->tot += bcr->n_seqs;
-	for (j = 0; j < 6; ++j) bcr->bwt[j].n = c[j];
-	for (l = 0; l < 6; ++l) bcr->bwt[0].c[l] = 0;
-	for (j = 1; j < 6; ++j)
-		for (l = 0; l < 6; ++l)
-			bcr->bwt[j].c[l] = bcr->bwt[j-1].e->mc[l];
-	for (j = 1; j < 6; ++j)
-		for (l = 0; l < 6; ++l)
-			bcr->bwt[j].c[l] += bcr->bwt[j-1].c[l];
-	memmove(c + 1, c, 40);
-	for (k = 1, c[0] = 0; k < 8; ++k) c[k] += c[k - 1]; // NB: MUST BE "8"; otherwise rs_classify_alt() will fail
-	rs_classify_alt(a, a + bcr->n_seqs, c);
-	for (j = 0; j < 6; ++j)
-		bcr->c[j] += c[j], bcr->bwt[j].a = a + c[j];
-	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += c[a[k].v&7];
 	return a;
 }
 
@@ -423,12 +421,13 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 
 	if (bwt->n == 0) return;
 	for (k = bcr->tot, l = 0; k; k >>= 1, ++l);
-	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0);
-	for (k = 0; k < bwt->n; ++k) {
+	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
+	for (k = 0; k < bwt->n; ++k) { // compute the relative position in the old bucket
 		pair64_t *u = &bwt->a[k];
-		u->u -= k + bcr->c[class];
-		u->v = (u->v&~7ULL) | (pos >= (u->v>>3&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>19) + 1);
+		u->u -= k + bcr->c[class]; // the relative position in the old bucket
+		u->v = (u->v&~7ULL) | (pos >= (u->v>>3&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>19) + 1); // set the base to insert
 	}
+	// insert the column to the existing BWT $er and write to $ew; $er will be destroyed gradually
 	ew = rll_init();
 	rll_itr_init(er, &ir);
 	rll_itr_init(ew, &iw);
@@ -439,7 +438,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 		if (u->u > l) rll_copy(ew, &iw, er, &ir, u->u - l);
 		l = u->u;
 		rll_enc(ew, &iw, 1, a);
-		u->u = ((ew->mc[a] + iw.l - 1) - c[a]) + bcr->c[a] + bwt->c[a];
+		u->u = ((ew->mc[a] + iw.l - 1) - c[a]) + bcr->c[a] + bwt->c[a]; // compute the incomplete position in the new BWT
 		++c[a];
 	}
 	if (l < er->l) rll_copy(ew, &iw, er, &ir, er->l - l);
@@ -447,6 +446,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	rll_destroy(er);
 	bwt->e = ew;
 }
+
 static int worker_aux(worker_t *w)
 {
 	struct timespec req, rem;
@@ -473,7 +473,7 @@ void bcr_build(bcr_t *b)
 	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs * 2);
-	if (b->tmpfn) {
+	if (b->tmpfn) { // dump the transposed sequences to a temporary file
 		tmpfp = fopen(b->tmpfn, "wb");
 		for (pos = 0; pos < b->max_len; ++pos) {
 			ld_dump(b->seq[pos], tmpfp);
@@ -492,9 +492,9 @@ void bcr_build(bcr_t *b)
 		for (i = 1; i < b->n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
 	}
 	a = malloc(b->n_seqs * 16);
-	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3;
-	free(b->len); b->len = 0;
-	for (pos = 0; pos <= b->max_len; ++pos) {
+	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3; // keep the sequence lengths in the $a array: reduce memory and cache misses
+	free(b->len); b->len = 0; // we do not need $b->len now
+	for (pos = 0; pos <= b->max_len; ++pos) { // "==" to add the sentinels
 		a = set_bwt(b, a, pos);
 		if (pos != b->max_len && tmpfp) b->seq[pos] = ld_restore(tmpfp);
 		if (pos) {
