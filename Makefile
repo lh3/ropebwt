@@ -1,7 +1,7 @@
 CC=			gcc
 CFLAGS=		-g -Wall -O2 #-fno-inline-functions -fno-inline-functions-called-once
 DFLAGS=
-PROG=		bpr-mt ropebwt
+PROG=		bpr-mt ropebwt bcr-demo
 INCLUDES=	
 LIBS=		-lpthread -lz
 
@@ -17,6 +17,9 @@ bpr-mt:bprope6.o rld.o bpr-mt.o main-bpr-mt.o
 
 ropebwt:bprope6.o rbrope6.o bcr.o main-misc.o
 		$(CC) $(CFLAGS) $(DFLAGS) $^ -o $@ $(LIBS)
+
+bcr-demo:bcr-demo.o
+		$(CC) $(CFLAGS) $(DFLAGS) $^ -o $@
 
 bprope6.o:bprope6.h
 rbrope6.o:rbrope6.h
