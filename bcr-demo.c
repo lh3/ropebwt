@@ -54,6 +54,16 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s) // integer radix s
 	}
 }
 
+/**
+ * Append $T to existing BWT $B.
+ *
+ * @param Blen    length of the existing BWT
+ * @param B       existing BWT; set to NULL if non-existing
+ * @param Tlen    length of input string
+ * @param T       input string; '\0' represents a sentinel
+ *
+ * @return  the new BWT string
+ */
 uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 {
 	long i, k, n, max, n0;
@@ -86,7 +96,7 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 		if (i) { // sort the absolute positions
 			for (k = Blen, c = 0; k; k >>= 1, ++c); // find how many bits needed for radix sort
 			rs_sort(a, a + n0, 8, c > 7? c - 7 : 0); // radix sort
-		}
+		} // TODO: I guess radix sorting ($u->v&0xff) and then $u->u should be faster, but anyway speed is not the main concern
 		for (c = 0; c != 256; ++c) mc[c] = 0;
 		end = B0 + Blen; Blen += n0; B -= n0;
 		for (n = k = 0, p = B0, q = B, pre = -1L; k < n0; ++k) {
