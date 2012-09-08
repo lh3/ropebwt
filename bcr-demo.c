@@ -61,7 +61,7 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 		while (p < end) ++mc[*p], *q++ = *p++; // copy the rest of $B0 to $B
 		for (c = 1, ac[0] = 0; c != 256; ++c) ac[c] = ac[c-1] + mc[c-1]; // accumulative count
 		for (k = 0; k < n; ++k) a[k].u += ac[a[k].v&0xff] + n; // compute positions for the next round
-		// stable sort by ($a[k].v&0xff); also possible with an in-place non-stable radix sort, which is slower
+		// stable counting sort ($a[k].v&0xff); also possible with an in-place non-stable radix sort, which is slower
 		aa = malloc(sizeof(pair64_t) * n);
 		for (c = 1, b[0] = aa; c != 256; ++c) b[c] = b[c-1] + mc2[c-1];
 		for (k = 0; k < n; ++k) *b[a[k].v&0xff]++ = a[k]; // this works because $a is already partially sorted
