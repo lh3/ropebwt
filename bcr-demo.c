@@ -93,10 +93,6 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 	// core loop
 	for (i = 0, n0 = n; n0; ++i) {
 		long l, pre, ac[256], mc[256];
-		if (i) { // sort the absolute positions
-			for (k = Blen, c = 0; k; k >>= 1, ++c); // find how many bits needed for radix sort
-			rs_sort(a, a + n0, 8, c > 7? c - 7 : 0); // radix sort
-		} // TODO: I guess radix sorting ($u->v&0xff) and then $u->u should be faster, but anyway speed is not the main concern
 		for (c = 0; c != 256; ++c) mc[c] = 0;
 		end = B0 + Blen; Blen += n0; B -= n0;
 		for (n = k = 0, p = B0, q = B, pre = -1L; k < n0; ++k) {
@@ -113,6 +109,8 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 		while (p < end) ++mc[*p], *q++ = *p++; // copy the rest of $B0 to $B
 		for (c = 1, ac[0] = 0; c != 256; ++c) ac[c] = ac[c-1] + mc[c-1]; // accumulative count
 		for (k = 0; k < n; ++k) a[k].u += ac[a[k].v&0xff] + n; // compute the absolute positions
+		for (k = Blen, c = 0; k; k >>= 1, ++c); // find how many bits needed for radix sort
+		if (n) rs_sort(a, a + n, 8, c > 7? c - 7 : 0); // radix sort
 		B0 = B; n0 = n;
 	}
 	free(P); free(a);
