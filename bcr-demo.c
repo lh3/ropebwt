@@ -20,7 +20,7 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 {
 	long i, k, n, max, n0;
 	uint8_t *p, *q, *B0;
-	const uint8_t *end, **P;
+	const uint8_t *end, **P = 0;
 	pair64_t *a;
 	int c;
 	// split $T into short strings at sentinels
