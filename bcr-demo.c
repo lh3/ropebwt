@@ -2,6 +2,43 @@
 #include <stdint.h>
 #include <string.h>
 
+uint8_t *bcr_tiny(int n, const uint8_t **P) {
+  typedef struct { uint64_t k, i:56, c:8; } info_t;
+  int i, k, c, *len, n0, Tlen = 0, Blen = 0;
+  uint8_t *p, *q, *B, *B0, *end;
+  info_t *a=0; // a.k: BWT pos; a.i: read index
+  a=malloc(n*sizeof(info_t)); len=malloc(n*sizeof(int));
+  for (i = 0; i < n; ++i)
+    Tlen += (len[i] = strlen((char*)P[i])) + 1;
+  for (k = 0; k < n; ++k) a[k].k = a[k].i = k;
+  B = malloc(Tlen); B = B0 = B + Tlen;
+  for (i = 0; n; ++i) { // loop until no remaining seq
+    int l, pre, C[256], mc[256], cc[256];
+    info_t *b[256], *aa;
+    for (c = 0; c != 256; ++c) mc[c] = cc[c] = 0;
+    end = B0 + Blen; Blen += n; B -= n; n0 = n;
+    // insert a column of P to B0 while copying to B
+    for (n = k = 0, p = B0, q = B, pre = 0; k < n0; ++k) {
+      info_t *u = &a[k];
+      u->c = c = i>=len[u->i]? 0 : P[u->i][len[u->i]-i-1];
+      for (l = 0; l != u->k-pre; ++l) ++mc[*p], *q++=*p++;
+      *q++ = c; pre = u->k + 1; u->k = mc[c]++;
+      if (c) a[n++]=a[k], ++cc[c];
+    } // n is now the number of remaining sequences
+    while (p < end) ++mc[*p], *q++ = *p++; //copy the rest
+    for (c = 1, C[0] = 0; c != 256; ++c)
+      C[c] = C[c-1] + mc[c-1]; // accumulative counts
+    for (k = 0; k < n; ++k) a[k].k += C[a[k].c] + n;
+    aa = malloc(sizeof(info_t) * n);
+    for (c=1, b[0] = aa; c != 256; ++c) // counting sort
+      b[c] = b[c-1] + cc[c-1];
+    for (k = 0; k < n; ++k) *b[a[k].c]++ = a[k];
+    free(a); a = aa; B0 = B;
+  }
+  free(a); free(len);
+  return B;
+}
+
 typedef struct {
 	uint64_t u, v;
 } pair64_t;
@@ -35,6 +72,7 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 	}
 	P = realloc(P, (n + 1) * sizeof(void*));
 	P[n] = q;
+	return bcr_tiny(n, P);
 	// initialize
 	for (p = B, end = B + Blen, i = 0; p < end; ++p) i += (*p == 0); // count # of sentinels
 	a = malloc(sizeof(pair64_t) * n);
