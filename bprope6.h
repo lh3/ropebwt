@@ -34,6 +34,9 @@ typedef struct bprope6_s bprope6_t;
 struct bpriter_s;
 typedef struct bpriter_s bpriter_t;
 
+#define BPR_MAX_NODES 64
+#define BPR_MAX_RUNS  512
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,6 +57,11 @@ extern "C" {
 	const uint8_t *bpr_iter_next(bpriter_t *iter, int *n);
 	// memory used by the rope
 	int64_t bpr_mem(bprope6_t *rope);
+	// marginal count if 0<=c<6; or total counts otherwise
+	int64_t bpr_get_cnt(bprope6_t *r, int c);
+
+	int bpr_dump(const bprope6_t *rope, const char *fn);
+	bprope6_t *bpr_restore(const char *fn, int max_nodes, int max_runs);
 
 #ifdef __cplusplus
 }

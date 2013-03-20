@@ -28,6 +28,7 @@ enum algo_e { BPR, RBR, BCR };
 #define FLAG_TREE 0x10
 #define FLAG_THR 0x20
 #define FLAG_NON 0x40
+#define FLAG_BI  0x80
 
 int main(int argc, char *argv[])
 {
@@ -42,7 +43,7 @@ int main(int argc, char *argv[])
 	int c, i, max_runs = 512, max_nodes = 64;
 	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD;
 
-	while ((c = getopt(argc, argv, "TFRObNo:r:n:ta:f:v:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObBNo:r:n:ta:f:v:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -56,6 +57,7 @@ int main(int argc, char *argv[])
 		else if (c == 'b') flag |= FLAG_BIN;
 		else if (c == 'N') flag |= FLAG_NON;
 		else if (c == 't') flag |= FLAG_THR;
+		else if (c == 'B') flag |= FLAG_BI;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
 		else if (c == 'f') tmpfn = optarg;
@@ -80,12 +82,17 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	if (flag & FLAG_BI) {
+		bpr = bpr_restore(argv[optind], max_nodes, max_runs);
+		goto to_print;
+	}
+
 	if (algo == BCR) {
 		bcr = bcr_init(flag&FLAG_THR, tmpfn);
 		if (!(flag&FLAG_NON)) fprintf(stderr, "Warning: With bcr, an ambiguous base will be converted to a random base\n");
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);
-	fp = gzopen(argv[optind], "rb");
+	fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "rb") : gzdopen(fileno(stdin), "rb");
 	ks = kseq_init(fp);
 	while (kseq_read(ks) >= 0) {
 		int l = ks->seq.l;
@@ -142,6 +149,8 @@ int main(int argc, char *argv[])
 		} \
 		free(itr); \
 	} while (0)
+
+to_print:
 
 	if (rbr) {
 		print_bwt(rbriter_t, rbr_iter_init(rbr), rbr_iter_next, flag&FLAG_BIN, out);

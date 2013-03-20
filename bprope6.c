@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+#include <zlib.h>
 #include "bprope6.h"
 
 #define MP_CHUNK_SIZE 0x100000 // 1MB per chunk
@@ -252,6 +253,15 @@ int64_t bpr_mem(bprope6_t *rope)
 		+ sizeof(mempool_t) * 2 + sizeof(bprope6_t) + 10 * sizeof(void*);
 }
 
+int64_t bpr_get_cnt(bprope6_t *r, int c)
+{
+	return (c < 0 || c >= 6)? r->c[0] + r->c[1] + r->c[2] + r->c[3] + r->c[4] + r->c[5] : r->c[c];
+}
+
+/************
+ * Iterator *
+ ************/
+
 struct bpriter_s {
 	const bprope6_t *rope;
 	const node_t *pa[80];
@@ -280,4 +290,50 @@ const uint8_t *bpr_iter_next(bpriter_t *i, int *n)
 		while (!i->pa[i->k]->is_bottom) // descend to the leftmost leaf
 			++i->k, i->pa[i->k] = i->pa[i->k - 1][i->ia[i->k - 1]].p;
 	return ret;
+}
+
+/************
+ * RLE6 I/O *
+ ************/
+
+int bpr_dump(const bprope6_t *rope, const char *fn)
+{
+	bpriter_t *itr;
+	FILE *fp;
+	const uint8_t *s;
+	int l;
+
+	fp = strcmp(fn, "-")? fopen(fn, "wb") : fdopen(fileno(stdout), "wb");
+	if (fp == 0) return -1;
+	itr = bpr_iter_init(rope);
+	fwrite("RLE\6", 4, 1, fp);
+	while ((s = bpr_iter_next(itr, &l)) != 0)
+		fwrite(s, 1, l, fp);
+	free(itr);
+	fclose(fp);
+	return 0;
+}
+
+bprope6_t *bpr_restore(const char *fn, int max_nodes, int max_runs)
+{
+	char magic[4];
+	uint8_t buf[0x10000];
+	int i, l, j;
+	FILE *fp;
+	bprope6_t *bpr;
+
+	fp = strcmp(fn, "-")? gzopen(fn, "rb") : gzdopen(fileno(stdin), "rb");
+	if (fp == 0) return 0;
+	gzread(fp, magic, 4);
+	if (strncmp(magic, "RLE\6", 4) != 0) {
+		fprintf(stderr, "[E::%s] Wrong RLE6 magic number\n", __func__);
+		gzclose(fp);
+		return 0;
+	}
+	bpr = bpr_init(max_nodes, max_runs);
+	while ((l = gzread(fp, buf, 0x10000)) != 0)
+		for (i = 0; i < l; ++i)
+			for (j = 0; j < buf[i]>>3; ++j)
+				bpr_insert_symbol(bpr, buf[i]&7, bpr->c[0] + bpr->c[1] + bpr->c[2] + bpr->c[3] + bpr->c[4] + bpr->c[5]);
+	return bpr;
 }
