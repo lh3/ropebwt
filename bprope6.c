@@ -258,6 +258,61 @@ int64_t bpr_get_cnt(bprope6_t *r, int c)
 	return (c < 0 || c >= 6)? r->c[0] + r->c[1] + r->c[2] + r->c[3] + r->c[4] + r->c[5] : r->c[c];
 }
 
+/****************
+ * Compute rank *
+ ****************/
+
+int bpr_rank1a(const bprope6_t *rope, int64_t x, int64_t ok[6])
+{
+	node_t *u = 0, *v = 0, *p = rope->root;
+	int64_t y = 0;
+	int i, a, t, l;
+	const uint8_t *s, *q;
+
+	++x; // the following computes the rank before $x, but rank1a() includes $x
+	for (a = 0; a < 6; ++a) ok[a] = 0;
+	do {
+		u = p;
+		if (v && x - y > v->l>>1) {
+			p += p->n - 1; y += v->l;
+			for (a = 0; a < 6; ++a) ok[a] += v->c[a];
+			for (; y >= x; --p) {
+				y -= p->l;
+				for (a = 0; a < 6; ++a) ok[a] -= p->c[a];
+			}
+			++p;
+		} else {
+			for (; y + p->l < x; ++p) {
+				y += p->l;
+				for (a = 0; a < 6; ++a) ok[a] += p->c[a];
+			}
+		}
+		v = p; p = p->p;
+	} while (!u->is_bottom);
+	t = x - y;
+	q = (const uint8_t*)p;
+	if (t < v->l>>1) {
+		l = 0; s = q + 4;
+		do {
+			l += *s >> 3;
+			ok[*s&7] += *s >> 3;
+			++s;
+		} while (l < t);
+	} else {
+		for (a = 0; a < 6; ++a) ok[a] += v->c[a];
+		l = v->l; s = q + 4 + *(int32_t*)q;
+		do {
+			--s;
+			l -= *s >> 3;
+			ok[*s&7] -= *s >> 3;
+		} while (l >= t);
+		l += *s>>3, ok[*s&7] += *s>>3; ++s;
+	}
+	i = s - q - 4; s = q + 4;
+	ok[s[--i]&7] -= l - t;
+	return 0;
+}
+
 /************
  * Iterator *
  ************/

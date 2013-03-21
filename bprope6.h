@@ -63,6 +63,8 @@ extern "C" {
 	int bpr_dump(const bprope6_t *rope, const char *fn);
 	bprope6_t *bpr_restore(const char *fn, int max_nodes, int max_runs);
 
+	int bpr_rank1a(const bprope6_t *rope, int64_t x, int64_t ok[6]);
+
 #ifdef __cplusplus
 }
 #endif
