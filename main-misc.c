@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (algo == BCR) {
-		bcr = bcr_init(flag&FLAG_THR, tmpfn);
+		bcr = bcr_init(tmpfn);
 		if (!(flag&FLAG_NON)) fprintf(stderr, "Warning: With bcr, an ambiguous base will be converted to a random base\n");
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);
@@ -163,7 +163,7 @@ to_print:
 		bpr_destroy(bpr);
 	}
 	if (bcr) {
-		bcr_build(bcr);
+		bcr_build(bcr, flag&FLAG_THR);
 		print_bwt(bcritr_t, bcr_itr_init(bcr), bcr_itr_next, flag&FLAG_BIN, out);
 		bcr_destroy(bcr);
 	}

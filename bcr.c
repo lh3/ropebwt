@@ -326,14 +326,13 @@ typedef struct {
 	size_t mem;
 } bcrstat_t;
 
-bcr_t *bcr_init(int is_thr, const char *tmpfn)
+bcr_t *bcr_init(const char *tmpfn)
 {
 	bcr_t *b;
 	int i;
 	b = calloc(1, sizeof(bcr_t));
 	bcr_gettime(&b->rt0, &b->ct0);
 	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
-	b->n_threads = is_thr? 4 : 0;
 	if (tmpfn) b->tmpfn = strdup(tmpfn);
 	return b;
 }
@@ -458,10 +457,10 @@ static int worker_aux(worker_t *w)
 
 static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
 
-void bcr_build(bcr_t *b)
+void bcr_build(bcr_t *b, int is_threaded)
 {
 	int64_t k;
-	int pos, c, i;
+	int pos, c, i, n_threads = is_threaded? 4 : 1;
 	pair64_t *a;
 	FILE *tmpfp = 0;
 	double ct, rt;
@@ -483,12 +482,12 @@ void bcr_build(bcr_t *b)
 		bcr_gettime(&rt, &ct);
 		if (bcr_verbose >= 3) fprintf(stderr, "Saved sequences to the temporary file (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	}
-	if (b->n_threads > 1) {
-		tid = alloca(b->n_threads * sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
-		w = alloca(b->n_threads * sizeof(worker_t));
-		memset(w, 0, b->n_threads * sizeof(worker_t));
-		for (i = 0; i < b->n_threads; ++i) w[i].class = i + 1, w[i].bcr = b;
-		for (i = 1; i < b->n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
+	if (n_threads > 1) {
+		tid = alloca(n_threads * sizeof(pthread_t)); // tid[0] is not used, as the worker 0 is launched by the master
+		w = alloca(n_threads * sizeof(worker_t));
+		memset(w, 0, n_threads * sizeof(worker_t));
+		for (i = 0; i < n_threads; ++i) w[i].class = i + 1, w[i].bcr = b;
+		for (i = 1; i < n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
 	}
 	a = malloc(b->n_seqs * 16);
 	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3; // keep the sequence lengths in the $a array: reduce memory and cache misses
@@ -497,14 +496,14 @@ void bcr_build(bcr_t *b)
 		a = set_bwt(b, a, pos);
 		if (pos != b->max_len && tmpfp) b->seq[pos] = ld_restore(tmpfp);
 		if (pos) {
-			if (b->n_threads > 1) {
-				for (c = 0; c < b->n_threads; ++c) {
+			if (n_threads > 1) {
+				for (c = 0; c < n_threads; ++c) {
 					volatile int *p = &w[c].toproc;
 					w[c].pos = pos;
 					while (!__sync_bool_compare_and_swap(p, 0, 1));
 				}
 				worker_aux(&w[0]);
-				while (!__sync_bool_compare_and_swap(&b->proc_cnt, b->n_threads, 0));
+				while (!__sync_bool_compare_and_swap(&b->proc_cnt, n_threads, 0));
 			} else for (c = 1; c <= 4; ++c) next_bwt(b, c, pos);
 		} else next_bwt(b, 0, pos);
 		if (pos != b->max_len) ld_destroy(b->seq[pos]);
@@ -516,7 +515,7 @@ void bcr_build(bcr_t *b)
 		fclose(tmpfp);
 		unlink(b->tmpfn);
 	}
-	for (i = 1; i < b->n_threads; ++i) pthread_join(tid[i], 0);
+	for (i = 1; i < n_threads; ++i) pthread_join(tid[i], 0);
 }
 
 /****************
