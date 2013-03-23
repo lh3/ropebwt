@@ -311,7 +311,7 @@ typedef struct {
 } worker_t;
 
 struct bcr_s {
-	int max_len, n_threads;
+	int max_len, n_threads, is_fast;
 	uint64_t n_seqs, m_seqs, c[6], tot;
 	uint16_t *len;
 	longdna_t **seq;
@@ -399,7 +399,13 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	for (k = 1, ac[0] = 0; k < 8; ++k) ac[k] = ac[k - 1] + c[k - 1]; // accumulative counts; NB: MUST BE "8"; otherwise rs_classify_alt() will fail
 	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].v&7];
 	// classify into each bucket
-	rs_classify_alt(a, a + bcr->n_seqs, ac); // This is a bottleneck.
+	if (bcr->is_fast) {
+		pair64_t *aa, *b[8];
+		aa = malloc(bcr->n_seqs * sizeof(pair64_t));
+		for (k = 0; k < 8; ++k) b[k] = &aa[ac[k]];
+		for (k = 0; k < bcr->n_seqs; ++k) *b[a[k].v&7]++ = a[k];
+		free(a); a = aa;
+	} else rs_classify_alt(a, a + bcr->n_seqs, ac); // This is a bottleneck.
 	for (j = 0; j < 6; ++j) bcr->bwt[j].a = a + ac[j];
 	// update counts: $bcr->bwt[j].c[l] equals the number of symbol $l prior to bucket $j; needed by next_bwt()
 	for (l = 0; l < 6; ++l)
@@ -419,7 +425,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 
 	if (bwt->n == 0) return;
 	for (k = bcr->tot, l = 0; k; k >>= 1, ++l);
-	if (class) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
+	if (class && !bcr->is_fast) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
 	for (k = 0; k < bwt->n; ++k) { // compute the relative position in the old bucket
 		pair64_t *u = &bwt->a[k];
 		u->u -= k + bcr->c[class]; // the relative position in the old bucket
@@ -457,7 +463,7 @@ static int worker_aux(worker_t *w)
 
 static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
 
-void bcr_build(bcr_t *b, int is_threaded)
+void bcr_build(bcr_t *b, int is_threaded, int is_fast)
 {
 	int64_t k;
 	int pos, c, i, n_threads = is_threaded? 4 : 1;
@@ -467,6 +473,7 @@ void bcr_build(bcr_t *b, int is_threaded)
 	pthread_t *tid = 0;
 	worker_t *w = 0;
 
+	b->is_fast = !!is_fast;
 	bcr_gettime(&rt, &ct);
 	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	b->m_seqs = b->n_seqs;

@@ -29,6 +29,7 @@ enum algo_e { BPR, RBR, BCR };
 #define FLAG_THR 0x20
 #define FLAG_NON 0x40
 #define FLAG_BI  0x80
+#define FLAG_FST 0x100
 
 int main(int argc, char *argv[])
 {
@@ -43,7 +44,7 @@ int main(int argc, char *argv[])
 	int c, i, max_runs = 512, max_nodes = 64;
 	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD;
 
-	while ((c = getopt(argc, argv, "TFRObBNo:r:n:ta:f:v:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObBNqo:r:n:ta:f:v:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -58,6 +59,7 @@ int main(int argc, char *argv[])
 		else if (c == 'N') flag |= FLAG_NON;
 		else if (c == 't') flag |= FLAG_THR;
 		else if (c == 'B') flag |= FLAG_BI;
+		else if (c == 'q') flag |= FLAG_FST;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
 		else if (c == 'f') tmpfn = optarg;
@@ -163,7 +165,7 @@ to_print:
 		bpr_destroy(bpr);
 	}
 	if (bcr) {
-		bcr_build(bcr, flag&FLAG_THR);
+		bcr_build(bcr, flag&FLAG_THR, flag&FLAG_FST);
 		print_bwt(bcritr_t, bcr_itr_init(bcr), bcr_itr_next, flag&FLAG_BIN, out);
 		bcr_destroy(bcr);
 	}
