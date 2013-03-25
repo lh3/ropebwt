@@ -50,7 +50,6 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 		pair64_t *b[256], *aa;
 		for (c = 0; c != 256; ++c) mc[c] = mc2[c] = 0;
 		end = B0 + Blen; Blen += n0; B -= n0;
-		printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\n", a[k].v>>8, a[k].u);
 		for (n = k = 0, p = B0, q = B, pre = 0; k < n0; ++k) {
 			pair64_t *u = &a[k];
 			c = P[(u->v>>8) + 1] - 2 - i >= P[u->v>>8]? *(P[(u->v>>8) + 1] - 2 - i) : 0; // symbol to insert
@@ -64,6 +63,7 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 		while (p < end) ++mc[*p], *q++ = *p++; // copy the rest of $B0 to $B
 		for (c = 1, ac[0] = 0; c != 256; ++c) ac[c] = ac[c-1] + mc[c-1]; // accumulative count
 		for (k = 0; k < n; ++k) a[k].u += ac[a[k].v&0xff] + n; // compute positions for the next round
+		//printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\n", a[k].v>>8, a[k].u);
 		// stable counting sort ($a[k].v&0xff); also possible with an in-place non-stable radix sort, which is slower
 		aa = malloc(sizeof(pair64_t) * n);
 		for (c = 1, b[0] = aa; c != 256; ++c) b[c] = b[c-1] + mc2[c-1];
@@ -106,7 +106,7 @@ uint8_t *bcr_rlo(long Tlen, const uint8_t *T)
 	B = B0 = B + Tlen;
 	// core loop
 	for (i = 0, n0 = n; n0; ++i) {
-		long l, pre, ac[256], mc[256], mc2[256];
+		long l, pre, ac[256], mc[256], mc2[256], streak, start_u, start_pos;
 		pair64_t *b[256], *aa;
 		for (c = 0; c != 256; ++c) mc[c] = mc2[c] = 0;
 		end = B0 + Blen; Blen += n0; B -= n0;
@@ -115,34 +115,44 @@ uint8_t *bcr_rlo(long Tlen, const uint8_t *T)
 			u->v = (u->v&~0xffULL) | (P[(u->v>>8) + 1] - 2 - i >= P[u->v>>8]? *(P[(u->v>>8) + 1] - 2 - i) : 0);
 		}
 		ks_introsort(tmp, n0, a); // we can use a partial counting sort, which is faster than this introsort
-		for (k = 1, l = 0, pre = a[0].u; k < n0; ++k) { // differentiate identical ranks (*)
-			if (a[k].u == pre) a[k].u += k - l;
-			else l = k, pre = a[k].u;
+		for (k = 1, streak = 0, start_u = pre = start_pos = a[0].u, c = a[0].v&0xff; k < n0; ++k) {
+			if (a[k].u == pre) {
+				++streak;
+				if ((a[k].v&0xff) != c)
+					start_pos = start_u + streak, c = a[k].v&0xff;
+			} else start_u = start_pos = a[k].u, streak = 0, c = a[k].v&0xff;
+			pre = a[k].u;
+			a[k].u = start_pos;
 		}
-		printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\t%c\n", a[k].v>>8, a[k].u, a[k].v&0xff);
+//		printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\t%c\n", a[k].v>>8, a[k].u, a[k].v&0xff);
 
-		for (n = k = 0, p = B0, q = B, pre = 0; k < n0; ++k) {
+		for (n = k = 0, p = B0, q = B, pre = 0, streak = 0, start_u = start_pos = -1; k < n0; ++k) {
 			pair64_t *u = &a[k];
 			c = u->v & 0xff;
-			for (l = 0; l != u->u - pre; ++l) // copy symbols from B0 to B
+			if (u->u == start_u) ++streak;
+			else streak = 0;
+			for (l = 0; l != u->u + streak - pre; ++l) // copy symbols from B0 to B
 				++mc[*p], *q++ = *p++; // $mc: marginal counts of all processed symbols
 			*q++ = c;
-			pre = u->u + 1; u->u = mc[c]++;
+			pre = u->u + streak + 1;
+			if (u->u == start_u) {
+				u->u = start_pos;
+			} else {
+				start_u = u->u;
+				start_pos = u->u = mc[c];
+			}
+			++mc[c];
 			if (c) a[n++] = a[k], ++mc2[c]; // $mc2: marginal counts of the current column
 		}
 		while (p < end) ++mc[*p], *q++ = *p++; // copy the rest of $B0 to $B
 		for (c = 1, ac[0] = 0; c != 256; ++c) ac[c] = ac[c-1] + mc[c-1]; // accumulative count
 		for (k = 0; k < n; ++k) a[k].u += ac[a[k].v&0xff] + n; // compute positions for the next round
+		//printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\t%c\n", a[k].v>>8, a[k].u, a[k].v&0xff);
 		// stable counting sort ($a[k].v&0xff); also possible with an in-place non-stable radix sort, which is slower
 		aa = malloc(sizeof(pair64_t) * n);
 		for (c = 1, b[0] = aa; c != 256; ++c) b[c] = b[c-1] + mc2[c-1];
 		for (k = 0; k < n; ++k) *b[a[k].v&0xff]++ = a[k]; // this works because $a is already partially sorted
 		free(a); a = aa; // $aa now becomes $a
-		for (k = 1, pre = a[0].u<<8|(a[0].v&0xff), l = 0; k < n; ++k) { // largely the reverse of loop (*)
-			if ((a[k].u<<8|(a[k].v&0xff)) == pre + ((k-l)<<8))
-				a[k].u = a[l].u;
-			else pre = a[k].u<<8|(a[k].v&0xff), l = k;
-		}
 		B0 = B; n0 = n;
 	}
 	free(P); free(a);
