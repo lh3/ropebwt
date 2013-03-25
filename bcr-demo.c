@@ -8,6 +8,25 @@ typedef struct {
 	uint64_t u, v;
 } pair64_t;
 
+static const uint8_t **split_str(long Tlen, const uint8_t *T, long *n_)
+{
+	long n, max;
+	uint8_t *p, *q;
+	const uint8_t **P = 0, *end;
+	for (p = q = (uint8_t*)T, end = T + Tlen, n = max = 0; p != end; ++p) {
+		if (*p) continue;
+		if (n == max) {
+			max = max? max<<1 : 256;
+			P = realloc(P, max * sizeof(void*));
+		}
+		P[n++] = q, q = p + 1;
+	}
+	P = realloc(P, (n + 1) * sizeof(void*));
+	P[n] = q;
+	*n_ = n;
+	return P;
+}
+
 /**
  * Append $T to existing BWT $B.
  *
@@ -20,24 +39,15 @@ typedef struct {
  */
 uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 {
-	long i, k, n, max, n0;
+	long i, k, n, n0;
 	uint8_t *p, *q, *B0;
-	const uint8_t *end, **P = 0;
+	const uint8_t *end, **P;
 	pair64_t *a;
 	int c;
-	// split $T into short strings at sentinels
+
 	if (T == 0 || Tlen == 0) return B;
-	for (p = q = (uint8_t*)T, end = T + Tlen, n = max = 0; p != end; ++p) {
-		if (*p) continue;
-		if (n == max) {
-			max = max? max<<1 : 256;
-			P = realloc(P, max * sizeof(void*));
-		}
-		P[n++] = q, q = p + 1;
-	}
-	P = realloc(P, (n + 1) * sizeof(void*));
-	P[n] = q;
 	// initialize
+	P = split_str(Tlen, T, &n);
 	for (p = B, end = B + Blen, i = 0; p < end; ++p) i += (*p == 0); // count # of sentinels
 	a = malloc(sizeof(pair64_t) * n);
 	for (k = 0; k < n; ++k) a[k].u = k + i, a[k].v = k<<8;
@@ -81,24 +91,15 @@ KSORT_INIT(tmp, pair64_t, pair64_lt)
 
 uint8_t *bcr_rlo(long Tlen, const uint8_t *T)
 {
-	long i, k, n, max, n0, Blen = 0;
+	long i, k, n, n0, Blen = 0;
 	uint8_t *p, *q, *B0, *B = 0;
-	const uint8_t *end, **P = 0;
+	const uint8_t *end, **P;
 	pair64_t *a;
 	int c;
-	// split $T into short strings at sentinels
+
 	if (T == 0 || Tlen == 0) return B;
-	for (p = q = (uint8_t*)T, end = T + Tlen, n = max = 0; p != end; ++p) {
-		if (*p) continue;
-		if (n == max) {
-			max = max? max<<1 : 256;
-			P = realloc(P, max * sizeof(void*));
-		}
-		P[n++] = q, q = p + 1;
-	}
-	P = realloc(P, (n + 1) * sizeof(void*));
-	P[n] = q;
 	// initialize
+	P = split_str(Tlen, T, &n);
 	a = malloc(sizeof(pair64_t) * n);
 	for (k = 0; k < n; ++k) a[k].u = 0, a[k].v = k<<8;
 	B = realloc(B, Blen + Tlen);
