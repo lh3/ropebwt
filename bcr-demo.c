@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <stdio.h>
+
 typedef struct {
 	uint64_t u, v;
 } pair64_t;
@@ -48,6 +50,7 @@ uint8_t *bcr_lite(long Blen, uint8_t *B, long Tlen, const uint8_t *T)
 		pair64_t *b[256], *aa;
 		for (c = 0; c != 256; ++c) mc[c] = mc2[c] = 0;
 		end = B0 + Blen; Blen += n0; B -= n0;
+		printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\n", a[k].v>>8, a[k].u);
 		for (n = k = 0, p = B0, q = B, pre = 0; k < n0; ++k) {
 			pair64_t *u = &a[k];
 			c = P[(u->v>>8) + 1] - 2 - i >= P[u->v>>8]? *(P[(u->v>>8) + 1] - 2 - i) : 0; // symbol to insert
@@ -116,6 +119,7 @@ uint8_t *bcr_rlo(long Tlen, const uint8_t *T)
 			if (a[k].u == pre) a[k].u += k - l;
 			else l = k, pre = a[k].u;
 		}
+		printf("===> %ld: '", i); for (k = 0; k < Blen-n0; ++k) putchar(B0[k]); printf("' <===\n"); for (k = 0; k < n0; ++k) printf("%lld\t%lld\t%c\n", a[k].v>>8, a[k].u, a[k].v&0xff);
 
 		for (n = k = 0, p = B0, q = B, pre = 0; k < n0; ++k) {
 			pair64_t *u = &a[k];
