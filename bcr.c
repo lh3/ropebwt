@@ -311,12 +311,11 @@ typedef struct {
 } worker_t;
 
 struct bcr_s {
-	int max_len, n_threads, is_fast, flag;
+	int max_len, n_threads, flag;
 	uint64_t n_seqs, m_seqs, c[6], tot;
 	uint16_t *len;
 	longdna_t **seq;
 	bucket_t bwt[6];
-	char *tmpfn; // temporary file name
 	volatile int proc_cnt; // for multi-threading
 	double rt0, ct0; // for timing
 };
@@ -326,15 +325,13 @@ typedef struct {
 	size_t mem;
 } bcrstat_t;
 
-bcr_t *bcr_init(const char *tmpfn)
+bcr_t *bcr_init()
 {
 	bcr_t *b;
 	int i;
 	b = calloc(1, sizeof(bcr_t));
 	bcr_gettime(&b->rt0, &b->ct0);
 	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
-	if (tmpfn) b->tmpfn = strdup(tmpfn);
-	b->flag |= BCR_F_RLO;
 	return b;
 }
 
@@ -342,7 +339,7 @@ void bcr_destroy(bcr_t *b)
 {
 	int i;
 	for (i = 0; i < 6; ++i) rll_destroy(b->bwt[i].e);
-	free(b->len); free(b->seq); free(b->tmpfn);
+	free(b->len); free(b->seq);
 	free(b);
 }
 
@@ -421,7 +418,7 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	for (k = 1, ac[0] = 0; k < 8; ++k) ac[k] = ac[k - 1] + c[k - 1]; // accumulative counts; NB: MUST BE "8"; otherwise rs_classify_alt() will fail
 	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].v&7];
 	// classify into each bucket
-	if (bcr->is_fast) {
+	if (bcr->flag & BCR_F_FAST) {
 		pair64_t *aa, *b[8];
 		aa = malloc(bcr->n_seqs * sizeof(pair64_t));
 		for (k = 0; k < 8; ++k) b[k] = &aa[ac[k]];
@@ -474,7 +471,8 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 
 	if (bwt->n == 0) return;
 	for (k = bcr->tot, l = 0; k; k >>= 1, ++l);
-	if (class && !bcr->is_fast) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
+	if (class && !(bcr->flag & BCR_F_FAST))
+		rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
 	for (k = 0; k < bwt->n; ++k) { // compute the relative position in the old bucket
 		pair64_t *u = &bwt->a[k];
 		u->v = (u->v&~7ULL) | (pos >= (u->v>>3&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>19) + 1); // set the base to insert
@@ -499,7 +497,7 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 		for (k = l = 0, streak = 0, old_u = new_u = -1; k < bwt->n; ++k) {
 			pair64_t *u = &bwt->a[k];
 			int a = u->v&7;
-			int64_t t = u->u;
+			//int64_t t = u->u;
 			if (u->u == old_u) ++streak;
 			else streak = 0;
 			if (u->u + streak > l) rll_copy(ew, &iw, er, &ir, u->u + streak - l);
@@ -541,29 +539,30 @@ static int worker_aux(worker_t *w)
 
 static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
 
-void bcr_build(bcr_t *b, int is_threaded, int is_fast)
+void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 {
 	int64_t k;
-	int pos, c, i, n_threads = is_threaded? 4 : 1;
+	int pos, c, i, n_threads;
 	pair64_t *a;
 	FILE *tmpfp = 0;
 	double ct, rt;
 	pthread_t *tid = 0;
 	worker_t *w = 0;
 
-	b->is_fast = !!is_fast;
+	b->flag = flag;
+	n_threads = (flag&BCR_F_THR)? 4 : 1;
 	bcr_gettime(&rt, &ct);
 	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	b->m_seqs = b->n_seqs;
 	b->len = realloc(b->len, b->n_seqs * 2);
-	if (b->tmpfn) { // dump the transposed sequences to a temporary file
-		tmpfp = fopen(b->tmpfn, "wb");
+	if (tmpfn) { // dump the transposed sequences to a temporary file
+		tmpfp = fopen(tmpfn, "wb");
 		for (pos = 0; pos < b->max_len; ++pos) {
 			ld_dump(b->seq[pos], tmpfp);
 			ld_destroy(b->seq[pos]);
 		}
 		fclose(tmpfp);
-		tmpfp = fopen(b->tmpfn, "rb");
+		tmpfp = fopen(tmpfn, "rb");
 		bcr_gettime(&rt, &ct);
 		if (bcr_verbose >= 3) fprintf(stderr, "Saved sequences to the temporary file (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
 	}
@@ -598,7 +597,7 @@ void bcr_build(bcr_t *b, int is_threaded, int is_fast)
 	free(a);
 	if (tmpfp) {
 		fclose(tmpfp);
-		unlink(b->tmpfn);
+		unlink(tmpfn);
 	}
 	for (i = 1; i < n_threads; ++i) pthread_join(tid[i], 0);
 }

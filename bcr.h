@@ -44,10 +44,10 @@ extern int bcr_verbose;
 extern "C" {
 #endif
 
-	bcr_t *bcr_init(const char *tmpfn);
+	bcr_t *bcr_init(void);
 	void bcr_destroy(bcr_t *b);
 	void bcr_append(bcr_t *b, int len, const uint8_t *seq);
-	void bcr_build(bcr_t *b, int is_threaded, int is_fast);
+	void bcr_build(bcr_t *b, int flag, const char *tmpfn);
 
 	bcritr_t *bcr_itr_init(const bcr_t *b);
 	const uint8_t *bcr_itr_next(bcritr_t *itr, int *l);

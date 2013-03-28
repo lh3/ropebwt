@@ -26,10 +26,8 @@ enum algo_e { BPR, RBR, BCR };
 #define FLAG_ODD 0x4
 #define FLAG_BIN 0x8
 #define FLAG_TREE 0x10
-#define FLAG_THR 0x20
-#define FLAG_NON 0x40
-#define FLAG_BI  0x80
-#define FLAG_FST 0x100
+#define FLAG_NON 0x20
+#define FLAG_BI  0x40
 
 int main(int argc, char *argv[])
 {
@@ -42,9 +40,9 @@ int main(int argc, char *argv[])
 	kseq_t *ks;
 	enum algo_e algo = BPR;
 	int c, i, max_runs = 512, max_nodes = 64;
-	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD;
+	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD, bcr_flag = 0;
 
-	while ((c = getopt(argc, argv, "TFRObBNqo:r:n:ta:f:v:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObBNqso:r:n:ta:f:v:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -57,9 +55,10 @@ int main(int argc, char *argv[])
 		else if (c == 'T') flag |= FLAG_TREE;
 		else if (c == 'b') flag |= FLAG_BIN;
 		else if (c == 'N') flag |= FLAG_NON;
-		else if (c == 't') flag |= FLAG_THR;
 		else if (c == 'B') flag |= FLAG_BI;
-		else if (c == 'q') flag |= FLAG_FST;
+		else if (c == 's') bcr_flag |= BCR_F_RLO;
+		else if (c == 't') bcr_flag |= BCR_F_THR;
+		else if (c == 'q') bcr_flag |= BCR_F_FAST;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
 		else if (c == 'f') tmpfn = optarg;
@@ -76,6 +75,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "         -v INT     verbose level (bcr only) [%d]\n", bcr_verbose);
 		fprintf(stderr, "         -b         binary output (5+3 runs starting after 4 bytes)\n");
 		fprintf(stderr, "         -t         enable threading (bcr only)\n");
+		fprintf(stderr, "         -s         build BWT in RLO (bcr only)\n");
 		fprintf(stderr, "         -F         skip forward strand\n");
 		fprintf(stderr, "         -R         skip reverse strand\n");
 		fprintf(stderr, "         -N         discard reads containing ambiguous bases\n");
@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (algo == BCR) {
-		bcr = bcr_init(tmpfn);
+		bcr = bcr_init();
 		if (!(flag&FLAG_NON)) fprintf(stderr, "Warning: With bcr, an ambiguous base will be converted to a random base\n");
 	} else if (algo == BPR) bpr = bpr_init(max_nodes, max_runs);
 	else if (algo == RBR) rbr = rbr_init(max_runs);
@@ -165,7 +165,7 @@ to_print:
 		bpr_destroy(bpr);
 	}
 	if (bcr) {
-		bcr_build(bcr, flag&FLAG_THR, flag&FLAG_FST);
+		bcr_build(bcr, bcr_flag, tmpfn);
 		print_bwt(bcritr_t, bcr_itr_init(bcr), bcr_itr_next, flag&FLAG_BIN, out);
 		bcr_destroy(bcr);
 	}
