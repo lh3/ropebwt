@@ -28,6 +28,10 @@
 
 #include <stdint.h>
 
+#define BCR_F_THR   0x1
+#define BCR_F_FAST  0x2
+#define BCR_F_RLO   0x4
+
 struct bcr_s;
 typedef struct bcr_s bcr_t;
 

@@ -311,7 +311,7 @@ typedef struct {
 } worker_t;
 
 struct bcr_s {
-	int max_len, n_threads, is_fast;
+	int max_len, n_threads, is_fast, flag;
 	uint64_t n_seqs, m_seqs, c[6], tot;
 	uint16_t *len;
 	longdna_t **seq;
@@ -334,6 +334,7 @@ bcr_t *bcr_init(const char *tmpfn)
 	bcr_gettime(&b->rt0, &b->ct0);
 	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
 	if (tmpfn) b->tmpfn = strdup(tmpfn);
+	b->flag |= BCR_F_RLO;
 	return b;
 }
 
@@ -380,21 +381,42 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	int j, l;
 	// compute the absolute position in the new BWT
 	memset(c, 0, 64);
-	if (pos == 0) {
-		for (k = 0; k < bcr->n_seqs; ++k) {
-			pair64_t *u = &a[k];
-			u->u += c[u->v&7]++;
-		}
+	if (bcr->flag & BCR_F_RLO) {
+		if (pos) {
+			int b;
+			for (b = m = 0; b < 6; ++b) {
+				int64_t pc[8];
+				bucket_t *bwt = &bcr->bwt[b];
+				memcpy(pc, c, 64);
+				for (k = 0; k < bwt->n; ++k) {
+					pair64_t *u = &bwt->a[k];
+					if ((u->v&7) == 0) continue;
+					u->u += pc[u->v&7];
+					++c[u->v&7];
+					if (m == u - a) ++m;
+					else a[m++] = *u;
+				}
+			}
+			// if (bcr->n_seqs > m) a = realloc(a, m * sizeof(pair64_t)); // FIXME: should be "<" instead of ">"
+			bcr->n_seqs = m;
+		} else c[0] = bcr->n_seqs;
 	} else {
-		for (k = m = 0; k < bcr->n_seqs; ++k) {
-			pair64_t *u = &a[k];
-			if ((u->v&7) == 0) continue;
-			u->u += c[u->v&7]++;
-			if (m == k) ++m;
-			else a[m++] = a[k];
+		if (pos == 0) {
+			for (k = 0; k < bcr->n_seqs; ++k) {
+				pair64_t *u = &a[k];
+				u->u += c[u->v&7]++;
+			}
+		} else {
+			for (k = m = 0; k < bcr->n_seqs; ++k) {
+				pair64_t *u = &a[k];
+				if ((u->v&7) == 0) continue;
+				u->u += c[u->v&7]++;
+				if (m == k) ++m;
+				else a[m++] = a[k];
+			}
+			// if (bcr->n_seqs > m) a = realloc(a, m * sizeof(pair64_t)); // FIXME: should be "<" instead of ">"
+			bcr->n_seqs = m;
 		}
-		// if (bcr->n_seqs > m) a = realloc(a, m * sizeof(pair64_t)); // FIXME: should be "<" instead of ">"
-		bcr->n_seqs = m;
 	}
 	for (k = 1, ac[0] = 0; k < 8; ++k) ac[k] = ac[k - 1] + c[k - 1]; // accumulative counts; NB: MUST BE "8"; otherwise rs_classify_alt() will fail
 	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].v&7];
@@ -416,6 +438,33 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	return a;
 }
 
+static void sort_alt(pair64_t *beg, pair64_t *end)
+{
+	pair64_t *i;
+	if (end - beg < 64) { // insertion sort, which is faster for small arrays
+		for (i = beg + 1; i < end; ++i)
+			if ((i->v&7) < ((i-1)->v&7)) {
+				pair64_t *j, tmp = *i;
+				for (j = i; j > beg && (tmp.v&7) < ((j-1)->v&7); --j)
+					*j = *(j - 1);
+				*j = tmp;
+			}
+	} else { // radix sort, which is faster for large arrays
+		int64_t ac[8], c[8];
+		int a;
+		for (a = 0; a < 8; ++a) a[c] = 0;
+		for (i = beg; i != end; ++i) ++c[i->v&7];
+		for (a = 1, ac[0] = 0; a < 8; ++a) ac[a] = ac[a - 1] + c[a - 1];
+		rs_classify_alt(beg, end, ac);
+	}
+	if (end - beg > 1) {
+		pair64_t *u;
+		for (i = beg + 1, u = beg; i < end; ++i)
+			if ((u->v&7) == (i->v&7)) i->u = u->u;
+			else i->u += i - beg, u = i;
+	}
+}
+
 static void next_bwt(bcr_t *bcr, int class, int pos)
 {
 	int64_t c[6], k, l;
@@ -428,24 +477,53 @@ static void next_bwt(bcr_t *bcr, int class, int pos)
 	if (class && !bcr->is_fast) rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
 	for (k = 0; k < bwt->n; ++k) { // compute the relative position in the old bucket
 		pair64_t *u = &bwt->a[k];
-		u->u -= k + bcr->c[class]; // the relative position in the old bucket
 		u->v = (u->v&~7ULL) | (pos >= (u->v>>3&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>19) + 1); // set the base to insert
+		u->u -= bcr->c[class]; // the relative position in the old bucket
+	}
+	if (bcr->flag & BCR_F_RLO) { // counting sort symbols inserted to the same position
+		int64_t beg;
+		for (k = 1, beg = 0; k <= bwt->n; ++k)
+			if (k == bwt->n || bwt->a[k].u != bwt->a[k-1].u) {
+				sort_alt(&bwt->a[beg], &bwt->a[k]);
+				beg = k;
+			}
+		//for (k = 0; k < bwt->n; ++k) printf("[%lld] to insert %c from read %lld at position %lld\n", k, "$ACGTN"[bwt->a[k].v&7], bwt->a[k].v>>19, bwt->a[k].u);
 	}
 	// insert the column to the existing BWT $er and write to $ew; $er will be destroyed gradually
 	ew = rll_init();
 	rll_itr_init(er, &ir);
 	rll_itr_init(ew, &iw);
 	memset(c, 0, 48);
-	for (k = l = 0; k < bwt->n; ++k) {
-		pair64_t *u = &bwt->a[k];
-		int a = u->v&7;
-		if (u->u > l) rll_copy(ew, &iw, er, &ir, u->u - l);
-		l = u->u;
-		rll_enc(ew, &iw, 1, a);
-		u->u = ((ew->mc[a] + iw.l - 1) - c[a]) + bcr->c[a] + bwt->c[a]; // compute the incomplete position in the new BWT
-		++c[a];
+	if (bcr->flag & BCR_F_RLO) {
+		int64_t old_u, new_u, streak;
+		for (k = l = 0, streak = 0, old_u = new_u = -1; k < bwt->n; ++k) {
+			pair64_t *u = &bwt->a[k];
+			int a = u->v&7;
+			int64_t t = u->u;
+			if (u->u == old_u) ++streak;
+			else streak = 0;
+			if (u->u + streak > l) rll_copy(ew, &iw, er, &ir, u->u + streak - l);
+			rll_enc(ew, &iw, 1, a);
+			l = u->u + streak + 1;
+			if (u->u != old_u) {
+				old_u = u->u;
+				new_u = u->u = (ew->mc[a] + iw.l - 1) + bcr->c[a] + bwt->c[a]; // compute the incomplete position in the new BWT
+			} else u->u = new_u;
+			//printf("[%c,%d:%ld] %ld,%c@%ld->%ld\n", "$ACGTN"[class], pos, (long)k, (long)u->v>>19, "$ACGTN"[u->v&7], (long)t, (long)u->u);
+			++c[a];
+		}
+	} else {
+		for (k = l = 0; k < bwt->n; ++k) {
+			pair64_t *u = &bwt->a[k];
+			int a = u->v&7;
+			if (u->u > l) rll_copy(ew, &iw, er, &ir, u->u - l);
+			l = u->u + 1;
+			rll_enc(ew, &iw, 1, a);
+			u->u = ((ew->mc[a] + iw.l - 1) - c[a]) + bcr->c[a] + bwt->c[a]; // compute the incomplete position in the new BWT
+			++c[a];
+		}
 	}
-	if (l < er->l) rll_copy(ew, &iw, er, &ir, er->l - l);
+	if (l - bwt->n < er->l) rll_copy(ew, &iw, er, &ir, er->l - (l - bwt->n));
 	rll_enc_finalize(ew, &iw);
 	rll_destroy(er);
 	bwt->e = ew;

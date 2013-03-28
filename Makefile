@@ -15,7 +15,7 @@ all:$(PROG)
 bpr-mt:bprope6.o rld.o bpr-mt.o main-bpr-mt.o
 		$(CC) $(CFLAGS) $(DFLAGS) $^ -o $@ $(LIBS)
 
-ropebwt:bprope6.o rbrope6.o bcr-rlo.o main-misc.o
+ropebwt:bprope6.o rbrope6.o bcr.o main-misc.o
 		$(CC) $(CFLAGS) $(DFLAGS) $^ -o $@ $(LIBS)
 
 bcr-demo:bcr-demo.o
