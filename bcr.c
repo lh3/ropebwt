@@ -206,7 +206,7 @@ longdna_t *ld_restore(FILE *fp)
  ******************/
 
 typedef struct {
-	uint64_t u, v; // $u: position in partial BWT; $v: seq_id:45, seq_len:16, base:3
+	uint64_t u, v; // $u: position in partial BWT:61, base:3; $v: seq_id:48, seq_len:16
 } pair64_t;
 
 #define rstype_t pair64_t
@@ -258,7 +258,7 @@ void rs_sort(rstype_t *beg, rstype_t *end, int n_bits, int s)
 }
 
 /******************************
- *** Classify pair64_t::v&7 ***
+ *** Classify pair64_t::u&7 ***
  ******************************/
 
 void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac) // very similar to the first half of rs_sort()
@@ -270,11 +270,11 @@ void rs_classify_alt(rstype_t *beg, rstype_t *end, int64_t *ac) // very similar 
 	for (k = b; k != be;) {
 		if (k->b != k->e) {
 			rsbucket_t *l;
-			if ((l = b + ((*k->b).v&7)) != k) {
+			if ((l = b + ((*k->b).u&7)) != k) {
 				rstype_t tmp = *k->b, swap;
 				do {
 					swap = tmp; tmp = *l->b; *l->b++ = swap;
-					l = b + (tmp.v&7);
+					l = b + (tmp.u&7);
 				} while (l != k);
 				*k->b++ = tmp;
 			} else ++k->b;
@@ -381,20 +381,25 @@ void bcr_append(bcr_t *b, int len, const uint8_t *seq) // add a sequence
 	++b->n_seqs;
 }
 
+/* In both BCR and BCR-RLO, we in theory only need to sort a<<61|x<<3|b, where
+ * $a is the symbol at the k-th column, $b the symbol at the (k-1)-th column
+ * and $x is the position in BWT(k-1). However, for parallelization, we break
+ * this sort into two: we sort by $a first in set_bwt() and then by k<<3|b in
+ * next_bwt(). In the implementation, we use two in-place radix sorts.
+ *
+ * It is actually possible to use one stable counting sort in the non-RLO mode
+ * and two counting sorts in the RLO mode. It will be faster than in-place
+ * radix sort. The price is we will need additional 16*n bytes for an auxiliary
+ * array given n reads, which is quite a lot for real data.
+ */
+
 static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 {
 	int64_t k, c[8], ac[8], m;
 	int j, l;
 	// compute the absolute position in the new BWT
 	memset(c, 0, 64);
-	if (pos == 0) { // we are going to insert the last column (the first insertion)
-		if (!(bcr->flag & BCR_F_RLO)) {
-			for (k = 0; k < bcr->n_seqs; ++k) {
-				pair64_t *u = &a[k];
-				u->u += c[u->v&7]++;
-			}
-		} else c[0] = bcr->n_seqs; // with RLO, we are going to break ties later in next_bwt()
-	} else { // a[k].u computed in next_bwt() doesn't consider symbols inserted to other buckets. We need to fix this in the following code block.
+	if (pos) { // a[k].u computed in next_bwt() doesn't consider symbols inserted to other buckets. We need to fix this in the following code block.
 		int b;
 		for (b = m = 0; b < 6; ++b) { // loop through each bucket
 			int64_t pc[8]; // partial counts
@@ -402,26 +407,20 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 			memcpy(pc, c, 64); // the accumulated counts prior to the current bucket
 			for (k = 0; k < bwt->n; ++k) {
 				pair64_t *u = &bwt->a[k];
-				if ((u->v&7) == 0) continue; // come to the beginning of a string; no need to consider it in the next round
-				u->u += pc[u->v&7]; // correct for symbols inserted to other buckets
-				++c[u->v&7];
+				if ((u->u&7) == 0) continue; // come to the beginning of a string; no need to consider it in the next round
+				u->u += pc[u->u&7]<<3; // correct for symbols inserted to other buckets
+				++c[u->u&7];
 				if (m == u - a) ++m;
 				else a[m++] = *u;
 			}
 		}
 		// if (bcr->n_seqs > m) a = realloc(a, m * sizeof(pair64_t));
 		bcr->n_seqs = m; // $m is the new size of the $a array
-	}
+	} else c[0] = bcr->n_seqs;
 	for (k = 1, ac[0] = 0; k < 8; ++k) ac[k] = ac[k - 1] + c[k - 1]; // accumulative counts; NB: MUST BE "8"; otherwise rs_classify_alt() will fail
-	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].v&7];
-	// classify into each bucket
-	if (bcr->flag & BCR_F_FAST) {
-		pair64_t *aa, *b[8];
-		aa = malloc(bcr->n_seqs * sizeof(pair64_t));
-		for (k = 0; k < 8; ++k) b[k] = &aa[ac[k]];
-		for (k = 0; k < bcr->n_seqs; ++k) *b[a[k].v&7]++ = a[k];
-		free(a); a = aa;
-	} else rs_classify_alt(a, a + bcr->n_seqs, ac); // This is a bottleneck.
+	for (k = 0; k < bcr->n_seqs; ++k) a[k].u += ac[a[k].u&7]<<3;
+	// radix sort into each bucket; in the non-RLO mode, we can use a stable counting sort here and skip the other rs_sort() in next_bwt()
+	rs_classify_alt(a, a + bcr->n_seqs, ac); // This is a bottleneck.
 	for (j = 0; j < 6; ++j) bcr->bwt[j].a = a + ac[j];
 	// update counts: $bcr->bwt[j].c[l] equals the number of symbol $l prior to bucket $j; needed by next_bwt()
 	for (l = 0; l < 6; ++l)
@@ -432,89 +431,49 @@ static pair64_t *set_bwt(bcr_t *bcr, pair64_t *a, int pos)
 	return a;
 }
 
-static void sort_alt(pair64_t *beg, pair64_t *end) // sort [beg,end) according to ->v&7; ->u should all be equal
-{
-	pair64_t *i;
-	if (end - beg < 64) { // insertion sort, which is faster for small arrays
-		for (i = beg + 1; i < end; ++i)
-			if ((i->v&7) < ((i-1)->v&7)) {
-				pair64_t *j, tmp = *i;
-				for (j = i; j > beg && (tmp.v&7) < ((j-1)->v&7); --j)
-					*j = *(j - 1);
-				*j = tmp;
-			}
-	} else { // radix sort, which is faster for large arrays
-		int64_t ac[8], c[8];
-		int a;
-		for (a = 0; a < 8; ++a) a[c] = 0;
-		for (i = beg; i != end; ++i) ++c[i->v&7];
-		for (a = 1, ac[0] = 0; a < 8; ++a) ac[a] = ac[a - 1] + c[a - 1];
-		rs_classify_alt(beg, end, ac); // TODO: in the fast mode, we can use counting sort, which is faster but uses more RAM
-	}
-	if (end - beg > 1) { // update ->u: break ties
-		pair64_t *u;
-		for (i = beg + 1, u = beg; i < end; ++i)
-			if ((u->v&7) == (i->v&7)) i->u = u->u;
-			else i->u += i - beg, u = i;
-	}
-}
-
-/* The following function can be written without differentiating the RLO and
- * non-RLO modes, by sorting the bcr->bwt[class].a array by (.u<<3 | (.v&0x7)).
- * This will merge rs_sort() and sort_alt().
- */
 static void next_bwt(bcr_t *bcr, int class, int pos)
 {
-	int64_t k, l;
+	int64_t k, l, beg, old_u, new_u, streak;
 	rllitr_t ir, iw;
 	bucket_t *bwt = &bcr->bwt[class];
 	rll_t *ew, *er = bwt->e;
 
 	if (bwt->n == 0) return;
-	for (k = bcr->tot, l = 0; k; k >>= 1, ++l);
-	if (class && !(bcr->flag & BCR_F_FAST))
-		rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
 	for (k = 0; k < bwt->n; ++k) { // compute the relative position in the old bucket
 		pair64_t *u = &bwt->a[k];
-		u->v = (u->v&~7ULL) | (pos >= (u->v>>3&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>19) + 1); // set the base to insert
-		u->u -= bcr->c[class]; // the relative position in the old bucket
+		u->u = ((u->u>>3) - bcr->c[class])<<3 | (pos >= (u->v&0xffff)? 0 : ld_get(bcr->seq[pos], u->v>>16) + 1);
 	}
-	if (bcr->flag & BCR_F_RLO) { // counting sort symbols inserted to the same position; in the non-RLO mode, the following still works, but not necessary
-		int64_t beg;
-		for (k = 1, beg = 0; k <= bwt->n; ++k)
-			if (k == bwt->n || bwt->a[k].u != bwt->a[k-1].u) {
-				sort_alt(&bwt->a[beg], &bwt->a[k]);
-				beg = k;
+	for (k = bcr->tot<<3, l = 0; k; k >>= 1, ++l);
+	rs_sort(bwt->a, bwt->a + bwt->n, 8, l > 7? l - 7 : 0); // sort by the absolute position in the new BWT
+	for (k = 1, beg = 0; k <= bwt->n; ++k)
+		if (k == bwt->n || bwt->a[k].u>>3 != bwt->a[k-1].u>>3) {
+			if (k - beg > 1) {
+				pair64_t *i, *u, *end = bwt->a + k, *start = &bwt->a[beg];
+				for (i = start + 1, u = start; i < end; ++i)
+					if ((u->u&7) == (i->u&7)) i->u = u->u;
+					else i->u += (i - start)<<3, u = i;
 			}
-	}
+			beg = k;
+		}
 	// insert the column to the existing BWT $er and write to $ew; $er will be destroyed gradually
 	ew = rll_init();
 	rll_itr_init(er, &ir);
 	rll_itr_init(ew, &iw);
-	if (bcr->flag & BCR_F_RLO) { // in the RLO mode, if a[k].u==a[l].u, the updated .u must be equal
-		int64_t old_u, new_u, streak;
-		for (k = l = 0, streak = 0, old_u = new_u = -1; k < bwt->n; ++k) {
-			pair64_t *u = &bwt->a[k];
-			int a = u->v&7;
-			if (u->u == old_u) ++streak;
-			else streak = 0;
-			if (u->u + streak > l) rll_copy(ew, &iw, er, &ir, u->u + streak - l); // copy u->u + streak - l symbols from the old BWT to the new
+	for (k = l = 0, streak = 0, old_u = new_u = -1; k < bwt->n; ++k) {
+		pair64_t *u = &bwt->a[k];
+		int a = u->u&7;
+		if (u->u != old_u) { // in the non-RLO mode, we always come to the following block
+			if (u->u>>3 > l) rll_copy(ew, &iw, er, &ir, (u->u>>3) - l); // copy u->u + streak - l symbols from the old BWT to the new
 			rll_enc(ew, &iw, 1, a); // write the current symbol in the new column
-			l = u->u + streak + 1;
-			if (u->u != old_u) {
-				old_u = u->u;
-				new_u = u->u = (ew->mc[a] + iw.l - 1) + bcr->c[a] + bwt->c[a]; // compute the incomplete position in the new BWT
-			} else u->u = new_u;
+			old_u = u->u;
+			new_u = u->u = ((ew->mc[a] + iw.l - 1) + bcr->c[a] + bwt->c[a])<<3 | a; // compute the incomplete position in the new BWT
+			streak = 0;
+		} else {
+			rll_enc(ew, &iw, 1, a); // write the current symbol in the new column
+			u->u = new_u;
+			++streak;
 		}
-	} else { // in the non-RLO mode, every ->u is different; the following is a special case of the code block above, but should be a bit faster
-		for (k = l = 0; k < bwt->n; ++k) {
-			pair64_t *u = &bwt->a[k];
-			int a = u->v&7;
-			if (u->u > l) rll_copy(ew, &iw, er, &ir, u->u - l);
-			l = u->u + 1;
-			rll_enc(ew, &iw, 1, a);
-			u->u = (ew->mc[a] + iw.l - 1) + bcr->c[a] + bwt->c[a]; // compute the incomplete position in the new BWT
-		}
+		l = (old_u>>3) + streak + 1;
 	}
 	if (l - bwt->n < er->l) rll_copy(ew, &iw, er, &ir, er->l - (l - bwt->n));
 	rll_enc_finalize(ew, &iw);
@@ -569,7 +528,8 @@ void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 		for (i = 1; i < n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
 	}
 	a = malloc(b->n_seqs * 16);
-	for (k = 0; k < b->n_seqs; ++k) a[k].u = 0, a[k].v = k<<19|b->len[k]<<3; // keep the sequence lengths in the $a array: reduce memory and cache misses
+	for (k = 0; k < b->n_seqs; ++k) // keep the sequence lengths in the $a array: reduce memory and cache misses
+		a[k].u = (flag&BCR_F_RLO)? 0 : k<<3, a[k].v = k<<16|b->len[k];
 	free(b->len); b->len = 0; // we do not need $b->len now
 	for (pos = 0; pos <= b->max_len; ++pos) { // "==" to add the sentinels
 		a = set_bwt(b, a, pos);

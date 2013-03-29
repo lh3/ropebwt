@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
 	int c, i, max_runs = 512, max_nodes = 64;
 	int flag = FLAG_FOR | FLAG_REV | FLAG_ODD, bcr_flag = 0;
 
-	while ((c = getopt(argc, argv, "TFRObBNqso:r:n:ta:f:v:")) >= 0)
+	while ((c = getopt(argc, argv, "TFRObBNso:r:n:ta:f:v:")) >= 0)
 		if (c == 'a') {
 			if (strcmp(optarg, "bpr") == 0) algo = BPR;
 			else if (strcmp(optarg, "rbr") == 0) algo = RBR;
@@ -58,7 +58,6 @@ int main(int argc, char *argv[])
 		else if (c == 'B') flag |= FLAG_BI;
 		else if (c == 's') bcr_flag |= BCR_F_RLO;
 		else if (c == 't') bcr_flag |= BCR_F_THR;
-		else if (c == 'q') bcr_flag |= BCR_F_FAST;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
 		else if (c == 'f') tmpfn = optarg;
