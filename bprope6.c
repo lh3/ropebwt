@@ -374,7 +374,7 @@ bprope6_t *bpr_restore(const char *fn, int max_nodes, int max_runs)
 	char magic[4];
 	uint8_t buf[0x10000];
 	int i, l, j;
-	FILE *fp;
+	gzFile fp;
 	bprope6_t *bpr;
 
 	fp = strcmp(fn, "-")? gzopen(fn, "rb") : gzdopen(fileno(stdin), "rb");
