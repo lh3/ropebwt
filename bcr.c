@@ -507,8 +507,6 @@ void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 	n_threads = (flag&BCR_F_THR)? 4 : 1;
 	bcr_gettime(&rt, &ct);
 	if (bcr_verbose >= 3) fprintf(stderr, "Read sequences into memory (%.3fs, %.3fs, %.3fM)\n", rt-b->rt0, ct-b->ct0, bcr_bwtmem(b)/1024./1024.);
-	b->m_seqs = b->n_seqs;
-	b->len = realloc(b->len, b->n_seqs * 2);
 	if (tmpfn) { // dump the transposed sequences to a temporary file
 		tmpfp = fopen(tmpfn, "wb");
 		for (pos = 0; pos < b->max_len; ++pos) {
