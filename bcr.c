@@ -22,6 +22,12 @@ int bcr_verbose = 2;
 #define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
 #endif
 
+#ifndef kmalloc
+#define kmalloc(type, p, size) if (((p) = (type)malloc((size))) == 0) fprintf(stderr, "[E::%s] fail to allocate %ld bytes\n", __func__, (long)(size))
+#define kcalloc(type, p, cnt, size) if (((p) = (type)calloc((cnt), (size))) == 0) fprintf(stderr, "[E::%s] fail to allocate %ld bytes\n", __func__, (long)(size))
+#define krealloc(type, p, p0, size) if (((p) = (type)realloc((p0), (size))) == 0) fprintf(stderr, "[E::%s] fail to allocate %ld bytes\n", __func__, (long)(size))
+#endif
+
 /**********************************************
  *** Lightweight run-length encoder/decoder ***
  **********************************************/
@@ -101,7 +107,7 @@ static void rll_enc_finalize(rll_t *e, rllitr_t *itr)
 	for (e->l = 0, c = 0; c < 6; ++c) e->l += e->mc[c];
 }
 
-static inline int64_t rll_dec(const rll_t *e, rllitr_t *itr, int *c, int is_free)
+static inline int64_t rll_dec(rllitr_t *itr, int *c, int is_free)
 {
 	int64_t l;
 	if (*itr->q == 7) return -1;
@@ -127,7 +133,7 @@ static inline void rll_copy(rll_t *e, rllitr_t *itr, const rll_t *e0, rllitr_t *
 		rll_enc(e, itr, itr0->l, itr0->c); // write all pending symbols
 		k -= itr0->l;
 		for (; k > 0; k -= l) { // we always go into this loop because l0<k
-			l = rll_dec(e0, itr0, &c, 1);
+			l = rll_dec(itr0, &c, 1);
 			rll_enc(e, itr, k < l? k : l, c);
 		}
 		itr0->l = -k; itr0->c = c;
@@ -153,7 +159,7 @@ void ld_destroy(longdna_t *ld)
 	free(ld->a); free(ld);
 }
 
-inline void ld_set(longdna_t *h, int64_t x, int c)
+static inline void ld_set(longdna_t *h, int64_t x, int c)
 {
 	int k = x >> LD_SHIFT, l = x & LD_MASK;
 	if (k >= h->max) {
@@ -163,11 +169,11 @@ inline void ld_set(longdna_t *h, int64_t x, int c)
 		h->a = realloc(h->a, sizeof(void*) * h->max);
 		for (j = old_max; j < h->max; ++j) h->a[j] = 0;
 	}
-	if (h->a[k] == 0) h->a[k] = calloc(1<<LD_SHIFT>>5, 8);
+	if (h->a[k] == 0) kcalloc(uint64_t*, h->a[k], 1<<LD_SHIFT>>5, 8);
 	h->a[k][l>>5] |= (uint64_t)(c&3)<<((l&31)<<1); // NB: we cannot set the same position multiple times
 }
 
-inline int ld_get(longdna_t *h, int64_t x)
+static inline int ld_get(longdna_t *h, int64_t x)
 {
 	return h->a[x>>LD_SHIFT][(x&LD_MASK)>>5]>>((x&31)<<1)&3;
 }
@@ -194,7 +200,7 @@ longdna_t *ld_restore(FILE *fp)
 	for (i = 0; i < ld->max; ++i) {
 		fread(&x, sizeof(int), 1, fp);
 		if (x) {
-			ld->a[i] = malloc(x *8);
+			kmalloc(uint64_t*, ld->a[i], x * 8);
 			fread(ld->a[i], 8, x, fp);
 		}
 	}
@@ -300,6 +306,16 @@ static void bcr_gettime(double *rt, double *ct)
 	*rt = tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
+static void liftrlimit() // increase the soft limit to hard limit
+{
+#ifdef __linux__
+	struct rlimit r;
+	getrlimit(RLIMIT_AS, &r);
+	if (r.rlim_cur < r.rlim_max) r.rlim_cur = r.rlim_max;
+	setrlimit(RLIMIT_AS, &r);
+#endif
+}
+
 /***********
  *** BCR ***
  ***********/
@@ -373,7 +389,7 @@ void bcr_append(bcr_t *b, int len, const uint8_t *seq) // add a sequence
 	}
 	if (b->n_seqs == b->m_seqs) {
 		b->m_seqs = b->m_seqs? b->m_seqs<<1 : 256;
-		b->len = realloc(b->len, b->m_seqs * 2);
+		krealloc(uint16_t*, b->len, b->len, b->m_seqs*2);
 	}
 	b->len[b->n_seqs] = len;
 	for (i = 0; i < len; ++i)
@@ -491,7 +507,11 @@ static int worker_aux(worker_t *w)
 	return (w->bcr->max_len == w->pos);
 }
 
-static void *worker(void *data) { while (worker_aux(data) == 0); return 0; }
+static void *worker(void *data)
+{
+	while (worker_aux(data) == 0);
+	return 0;
+}
 
 void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 {
@@ -503,6 +523,7 @@ void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 	pthread_t *tid = 0;
 	worker_t *w = 0;
 
+	liftrlimit();
 	b->flag = flag;
 	n_threads = (flag&BCR_F_THR)? 4 : 1;
 	bcr_gettime(&rt, &ct);
@@ -525,7 +546,7 @@ void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 		for (i = 0; i < n_threads; ++i) w[i].class = i + 1, w[i].bcr = b;
 		for (i = 1; i < n_threads; ++i) pthread_create(&tid[i], 0, worker, &w[i]);
 	}
-	a = malloc(b->n_seqs * 16);
+	kmalloc(pair64_t*, a, b->n_seqs * 16);
 	for (k = 0; k < b->n_seqs; ++k) // keep the sequence lengths in the $a array: reduce memory and cache misses
 		a[k].u = (flag&BCR_F_RLO)? 0 : k<<3, a[k].v = k<<16|b->len[k];
 	free(b->len); b->len = 0; // we do not need $b->len now
