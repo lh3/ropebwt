@@ -354,6 +354,7 @@ bcr_t *bcr_init()
 {
 	bcr_t *b;
 	int i;
+	liftrlimit();
 	b = calloc(1, sizeof(bcr_t));
 	bcr_gettime(&b->rt0, &b->ct0);
 	for (i = 0; i < 6; ++i) b->bwt[i].e = rll_init();
@@ -523,7 +524,6 @@ void bcr_build(bcr_t *b, int flag, const char *tmpfn)
 	pthread_t *tid = 0;
 	worker_t *w = 0;
 
-	liftrlimit();
 	b->flag = flag;
 	n_threads = (flag&BCR_F_THR)? 4 : 1;
 	bcr_gettime(&rt, &ct);
