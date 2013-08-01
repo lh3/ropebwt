@@ -49,6 +49,7 @@ extern "C" {
 	int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x);
 	// insert a string $str of length $l to $rope; NB: a different input order results in a different rope
 	void bpr_insert_string(bprope6_t *rope, int l, uint8_t *str);
+	void bpr_insert_string_rlo(bprope6_t *rope, int l, uint8_t *str);
 	// print the underlying B+ tree of $rope; for debugging only
 	void bpr_print(const bprope6_t *rope);
 	// ordered iterator

@@ -216,12 +216,16 @@ int64_t bpr_insert_symbol(bprope6_t *rope, int a, int64_t x)
 	return z;
 }
 
-void bpr_insert_string(bprope6_t *rope, int l, uint8_t *str)
+void bpr_insert_string_core(bprope6_t *rope, int l, uint8_t *str, uint64_t x)
 {
-	uint64_t x = rope->c[0];
 	for (--l; l >= 0; --l)
 		x = bpr_insert_symbol(rope, str[l], x);
 	bpr_insert_symbol(rope, 0, x);
+}
+
+void bpr_insert_string(bprope6_t *rope, int l, uint8_t *str)
+{
+	bpr_insert_string_core(rope, l, str, rope->c[0]);
 }
 
 bprope6_t *bpr_init(int max_nodes, int max_runs)
@@ -263,13 +267,13 @@ int64_t bpr_get_cnt(bprope6_t *r, int c)
  ****************/
 
 int bpr_rank1a(const bprope6_t *rope, int64_t x, int64_t ok[6])
-{
+{ // on return: ok[c] = |{i<x && a<c:B[i]=c}|; note that it is "i<x" not normally "i<=x"
 	node_t *u = 0, *v = 0, *p = rope->root;
 	int64_t y = 0;
 	int i, a, t, l;
 	const uint8_t *s, *q;
 
-	++x; // the following computes the rank before $x, but rank1a() includes $x
+//	++x; // the following computes the rank before $x, but rank1a() includes $x
 	for (a = 0; a < 6; ++a) ok[a] = 0;
 	do {
 		u = p;
@@ -311,6 +315,27 @@ int bpr_rank1a(const bprope6_t *rope, int64_t x, int64_t ok[6])
 	i = s - q - 4; s = q + 4;
 	ok[s[--i]&7] -= l - t;
 	return 0;
+}
+
+void bpr_insert_string_rlo(bprope6_t *rope, int len, uint8_t *str)
+{
+	int64_t tl[6], tu[6], l, u;
+	l = 0; u = rope->c[0];
+	while (--len >= 0) {
+		int a, c = str[len], cnt;
+		bpr_rank1a(rope, l, tl);
+		bpr_rank1a(rope, u, tu);
+		for (a = 0, cnt = 0; a < c; ++a) l += tu[a] - tl[a], cnt += rope->c[a];
+		if (tl[c] < tu[c]) {
+			int64_t x = l;
+			l = cnt + tl[c] + 1; u = cnt + tu[c] + 1;
+			bpr_insert_symbol(rope, c, x);
+		} else {
+			bpr_insert_string_core(rope, len+1, str, l);
+			return;
+		}
+	}
+	bpr_insert_symbol(rope, 0, l);
 }
 
 /************

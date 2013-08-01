@@ -28,6 +28,7 @@ enum algo_e { BPR, RBR, BCR };
 #define FLAG_TREE 0x10
 #define FLAG_NON 0x20
 #define FLAG_BI  0x40
+#define FLAG_RLO 0x80
 
 int main(int argc, char *argv[])
 {
@@ -56,7 +57,7 @@ int main(int argc, char *argv[])
 		else if (c == 'b') flag |= FLAG_BIN;
 		else if (c == 'N') flag |= FLAG_NON;
 		else if (c == 'B') flag |= FLAG_BI;
-		else if (c == 's') bcr_flag |= BCR_F_RLO;
+		else if (c == 's') bcr_flag |= BCR_F_RLO, flag |= FLAG_RLO;
 		else if (c == 't') bcr_flag |= BCR_F_THR;
 		else if (c == 'r') max_runs = atoi(optarg);
 		else if (c == 'n') max_nodes= atoi(optarg);
@@ -113,7 +114,10 @@ int main(int argc, char *argv[])
 		}
 		if (flag & FLAG_FOR) {
 			if (rbr) rbr_insert_string(rbr, ks->seq.l, s);
-			if (bpr) bpr_insert_string(bpr, ks->seq.l, s);
+			if (bpr) {
+				if (flag & FLAG_RLO) bpr_insert_string_rlo(bpr, ks->seq.l, s);
+				else bpr_insert_string(bpr, ks->seq.l, s);
+			}
 			if (bcr) bcr_append(bcr, ks->seq.l, s);
 		}
 		if (flag & FLAG_REV) {
@@ -125,7 +129,10 @@ int main(int argc, char *argv[])
 			}
 			if (l&1) s[i] = (s[i] >= 1 && s[i] <= 4)? 5 - s[i] : s[i];
 			if (rbr) rbr_insert_string(rbr, ks->seq.l, s);
-			if (bpr) bpr_insert_string(bpr, ks->seq.l, s);
+			if (bpr) {
+				if (flag & FLAG_RLO) bpr_insert_string_rlo(bpr, ks->seq.l, s);
+				else bpr_insert_string(bpr, ks->seq.l, s);
+			}
 			if (bcr) bcr_append(bcr, ks->seq.l, s);
 		}
 	}
