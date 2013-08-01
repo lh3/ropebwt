@@ -322,14 +322,15 @@ void bpr_insert_string_rlo(bprope6_t *rope, int len, uint8_t *str)
 	int64_t tl[6], tu[6], l, u;
 	l = 0; u = rope->c[0];
 	while (--len >= 0) {
-		int a, c = str[len], cnt;
+		int a, c = str[len];
 		bpr_rank1a(rope, l, tl);
 		bpr_rank1a(rope, u, tu);
-		for (a = 0, cnt = 0; a < c; ++a) l += tu[a] - tl[a], cnt += rope->c[a];
+		for (a = 0; a < c; ++a) l += tu[a] - tl[a];
 		if (tl[c] < tu[c]) {
-			int64_t x = l;
+			int64_t cnt;
+			bpr_insert_symbol(rope, c, l);
+			for (a = 0, cnt = 0; a < c; ++a) cnt += rope->c[a];
 			l = cnt + tl[c] + 1; u = cnt + tu[c] + 1;
-			bpr_insert_symbol(rope, c, x);
 		} else {
 			bpr_insert_string_core(rope, len+1, str, l);
 			return;
